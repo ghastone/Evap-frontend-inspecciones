@@ -255,10 +255,15 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
         </div>
 
         <Activity className="w-16 h-16 text-[#E96008] mb-6 animate-pulse" />
-        <h1 className="text-2xl md:text-4xl font-bold mb-3 text-slate-800 text-center px-4">Esperando señal de la Tablet...</h1>
-        <p className="text-slate-500 md:text-lg max-w-lg text-center px-6">
-          Inicia una evaluación de cajas para visualizar los gráficos del proceso en tiempo real.
+        
+        {/* TEXTOS ACTUALIZADOS */}
+        <h1 className="text-2xl md:text-4xl font-bold mb-3 text-slate-800 text-center px-4">
+          Esperando conexión en vivo...
+        </h1>
+        <p className="text-slate-500 md:text-lg max-w-lg text-center px-6 leading-relaxed">
+          Inicia la inspección de un nuevo proceso para comenzar a visualizar EVAP en tiempo real.
         </p>
+
       </div>
     );
   }

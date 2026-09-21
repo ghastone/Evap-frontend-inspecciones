@@ -3,7 +3,7 @@ import { ChevronLeft } from 'lucide-react';
 
 export default function NuevoProceso({ 
   exportadoras = [], 
-  productores = [], 
+  productores = [], // Esta prop recibe la lista de huertos
   variedades = [], 
   procesosExistentes = [], 
   onIniciarInspeccion, 
@@ -36,7 +36,8 @@ export default function NuevoProceso({
     const encontrado = csgFiltrados.find(h => String(h.csg) === String(codigoCsg));
     if (encontrado) { 
       setProductorNombre(encontrado.productor || ''); 
-      setHuertoNombre(encontrado.nombre || ''); 
+      // Aquí está la magia: buscamos "huerto" y si no está, buscamos "nombre"
+      setHuertoNombre(encontrado.huerto || encontrado.nombre || ''); 
     } else {
       setProductorNombre('');
       setHuertoNombre('');
@@ -124,7 +125,7 @@ export default function NuevoProceso({
             <label className="md:w-36 text-left md:text-right md:pr-6 text-[15px] font-bold text-slate-700">Exportadora:</label>
             <select required value={exportadoraSel} onChange={(e) => setExportadoraSel(e.target.value)} className="flex-1 bg-white border border-slate-300 rounded-full px-5 py-3 text-sm text-slate-800 outline-none focus:border-[#E96008] focus:ring-2 focus:ring-orange-100 appearance-none cursor-pointer">
               <option value="">Seleccionar...</option>
-              {exportadoras.map((e,i)=><option key={i} value={e}>{e}</option>)}
+              {exportadoras.map((e,i)=><option key={i} value={e.nombre || e}>{e.nombre || e}</option>)}
             </select>
           </div>
 
@@ -132,7 +133,10 @@ export default function NuevoProceso({
             <label className="md:w-36 text-left md:text-right md:pr-6 text-[15px] font-bold text-slate-700">CSG:</label>
             <select required disabled={!exportadoraSel} value={csgSel} onChange={(e) => handleSelectCSG(e.target.value)} className="flex-1 bg-white border border-slate-300 rounded-full px-5 py-3 text-sm text-slate-800 outline-none focus:border-[#E96008] focus:ring-2 focus:ring-orange-100 appearance-none disabled:bg-slate-50 disabled:text-slate-400 cursor-pointer">
               <option value="">{exportadoraSel ? 'Seleccionar...' : 'Selecciona Exportadora'}</option>
-              {csgFiltrados.map((i,idx)=><option key={idx} value={i.csg}>{i.csg} - {i.nombre}</option>)}
+              {csgFiltrados.map((i,idx) => (
+                // Aquí también soportamos "i.huerto" e "i.nombre" para mostrarlo bonito en la lista
+                <option key={idx} value={i.csg}>{i.csg} - {i.huerto || i.nombre}</option>
+              ))}
             </select>
           </div>
 
@@ -150,7 +154,7 @@ export default function NuevoProceso({
             <label className="md:w-36 text-left md:text-right md:pr-6 text-[15px] font-bold text-slate-700">Variedad:</label>
             <select required value={variedadSel} onChange={(e) => setVariedadSel(e.target.value)} className="flex-1 bg-white border border-slate-300 rounded-full px-5 py-3 text-sm text-slate-800 outline-none focus:border-[#E96008] focus:ring-2 focus:ring-orange-100 appearance-none cursor-pointer">
               <option value="">Seleccionar...</option>
-              {variedades.map((v,i)=><option key={i} value={v}>{v}</option>)}
+              {variedades.map((v,i)=><option key={i} value={v.nombre || v}>{v.nombre || v}</option>)}
             </select>
           </div>
 

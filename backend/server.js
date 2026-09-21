@@ -38,19 +38,102 @@ app.get('/api/live', (req, res) => {
   res.json(currentLiveProcess || { status: 'waiting' });
 });
 
-// --- Tablas Maestras ---
+// ==========================================
+// GESTIÓN DE HUERTOS (COMPLETO)
+// ==========================================
+
+// Obtener todos los huertos
 app.get('/api/huertos', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT h.id, h.productor, h.nombre_huerto as nombre, h.csg, e.nombre as exportadora 
+      SELECT h.id, h.productor, h.nombre_huerto as huerto, h.csg, e.nombre as exportadora 
       FROM huertos h JOIN exportadoras e ON h.exportadora_id = e.id ORDER BY h.productor ASC;
     `);
     res.json(result.rows);
   } catch (error) {
+    console.error('Error en GET /api/huertos:', error);
     res.status(500).json({ error: 'Error al obtener los huertos' });
   }
 });
 
+// Guardar un nuevo Huerto
+app.post('/api/huertos', async (req, res) => {
+  try {
+    const { productor, huerto, csg, exportadora } = req.body;
+    
+    // Primero, buscamos el ID de la exportadora según el nombre que viene del frontend
+    const expRes = await pool.query('SELECT id FROM exportadoras WHERE nombre = $1', [exportadora]);
+    
+    if (expRes.rows.length === 0) {
+      return res.status(400).json({ error: 'La exportadora seleccionada no existe en la base de datos' });
+    }
+
+    const result = await pool.query(
+      'INSERT INTO huertos (productor, nombre_huerto, csg, exportadora_id) VALUES ($1, $2, $3, $4) RETURNING *',
+      [productor, huerto, csg, expRes.rows[0].id]
+    );
+    
+    res.status(201).json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Error al guardar huerto:', error);
+    if (error.code === '23505') { // Error de unique constraint en PostgreSQL
+      return res.status(400).json({ error: 'El código CSG ya existe en otro huerto' });
+    }
+    res.status(500).json({ error: 'Error interno al guardar huerto' });
+  }
+});
+
+// Editar un Huerto existente
+app.put('/api/huertos/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { productor, huerto, csg, exportadora } = req.body;
+    
+    // Buscar el ID de la nueva exportadora seleccionada
+    const expRes = await pool.query('SELECT id FROM exportadoras WHERE nombre = $1', [exportadora]);
+
+    if (expRes.rows.length === 0) {
+      return res.status(400).json({ error: 'La exportadora seleccionada no existe' });
+    }
+
+    const result = await pool.query(
+      'UPDATE huertos SET productor = $1, nombre_huerto = $2, csg = $3, exportadora_id = $4 WHERE id = $5 RETURNING *',
+      [productor, huerto, csg, expRes.rows[0].id, id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'No se encontró el huerto para editar' });
+    }
+
+    res.json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Error al actualizar huerto:', error);
+    res.status(500).json({ error: 'Error interno al actualizar huerto' });
+  }
+});
+
+// Eliminar un Huerto
+app.delete('/api/huertos/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('DELETE FROM huertos WHERE id = $1', [id]);
+    
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'No se encontró el huerto para eliminar' });
+    }
+    
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error al eliminar huerto:', error);
+    // Si da error por llave foránea (tiene procesos asociados)
+    res.status(500).json({ error: 'No puedes eliminar este huerto porque ya tiene inspecciones y procesos guardados en el historial.' });
+  }
+});
+
+
+// ==========================================
+// GESTIÓN DE EXPORTADORAS
+// ==========================================
 app.get('/api/exportadoras', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM exportadoras ORDER BY nombre ASC;');
@@ -60,12 +143,101 @@ app.get('/api/exportadoras', async (req, res) => {
   }
 });
 
+app.post('/api/exportadoras', async (req, res) => {
+  try {
+    const { nombre } = req.body;
+    
+    if (!nombre) {
+      return res.status(400).json({ error: 'El nombre es obligatorio' });
+    }
+
+    const result = await pool.query(
+      'INSERT INTO exportadoras (nombre) VALUES ($1) RETURNING *',
+      [nombre]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error al guardar exportadora:', error);
+    if (error.code === '23505') {
+      return res.status(400).json({ error: 'La exportadora ya existe en la base de datos' });
+    }
+    res.status(500).json({ error: 'Error interno al guardar exportadora' });
+  }
+});
+
+app.delete('/api/exportadoras/:nombre', async (req, res) => {
+  try {
+    const { nombre } = req.params;
+    
+    const result = await pool.query(
+      'DELETE FROM exportadoras WHERE nombre = $1 RETURNING *',
+      [nombre]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'No se encontró la exportadora para eliminar' });
+    }
+
+    res.status(200).json({ message: 'Exportadora eliminada exitosamente' });
+  } catch (error) {
+    console.error('Error al eliminar exportadora:', error);
+    res.status(500).json({ error: 'Error interno al eliminar exportadora' });
+  }
+});
+
+// ==========================================
+// GESTIÓN DE VARIEDADES
+// ==========================================
 app.get('/api/variedades', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM variedades ORDER BY nombre ASC;');
     res.json(result.rows);
   } catch (error) {
     res.status(500).json({ error: 'Error al obtener variedades' });
+  }
+});
+
+app.post('/api/variedades', async (req, res) => {
+  try {
+    const { nombre } = req.body;
+    
+    if (!nombre) {
+      return res.status(400).json({ error: 'El nombre es obligatorio' });
+    }
+
+    const result = await pool.query(
+      'INSERT INTO variedades (nombre) VALUES ($1) RETURNING *',
+      [nombre]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error al guardar variedad:', error);
+    if (error.code === '23505') {
+      return res.status(400).json({ error: 'La variedad ya existe en la base de datos' });
+    }
+    res.status(500).json({ error: 'Error interno al guardar variedad' });
+  }
+});
+
+app.delete('/api/variedades/:nombre', async (req, res) => {
+  try {
+    const { nombre } = req.params;
+    
+    const result = await pool.query(
+      'DELETE FROM variedades WHERE nombre = $1 RETURNING *',
+      [nombre]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'No se encontró la variedad para eliminar' });
+    }
+
+    res.status(200).json({ message: 'Variedad eliminada exitosamente' });
+  } catch (error) {
+    console.error('Error al eliminar variedad:', error);
+    res.status(500).json({ error: 'Error interno al eliminar variedad' });
   }
 });
 
@@ -120,6 +292,9 @@ app.post('/api/inspecciones', async (req, res) => {
       }
     }
     await client.query('COMMIT');
+    
+    currentLiveProcess = null;
+    
     res.json({ success: true, procesoId });
   } catch (error) {
     await client.query('ROLLBACK');
@@ -293,6 +468,43 @@ app.delete('/api/inspecciones/:id', async (req, res) => {
     res.status(500).json({ error: error.message || 'Error al eliminar el proceso de la base de datos' });
   } finally {
     client.release();
+  }
+});
+
+// ==========================================
+// 5. OBTENER DATOS PARA INFORME PDF (GET)
+// ==========================================
+app.get('/api/procesos/:id/informe', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const query = `
+      SELECT 
+        p.id AS proceso_id, 
+        p.fecha, 
+        h.nombre_huerto AS huerto,
+        h.productor,
+        h.csg,
+        e.nombre AS exportadora,
+        v.nombre AS variedad,
+        p.estado AS nota_estado
+      FROM procesos p
+      LEFT JOIN huertos h ON p.huerto_id = h.id
+      LEFT JOIN exportadoras e ON p.exportadora_id = e.id
+      LEFT JOIN variedades v ON p.variedad_id = v.id
+      WHERE p.id = $1
+    `;
+    
+    const result = await pool.query(query, [id]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Proceso no encontrado' });
+    }
+    
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error en GET /api/procesos/:id/informe:', error);
+    res.status(500).json({ error: 'Error al obtener los datos del informe' });
   }
 });
 

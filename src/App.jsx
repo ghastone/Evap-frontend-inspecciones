@@ -25,6 +25,54 @@ export default function App() {
 
   const [datosProcesoActivo, setDatosProcesoActivo] = useState(null);
 
+  // ================= ESTADOS INTERCEPTOR DE NAVEGACIÓN =================
+  const [vistaPendiente, setVistaPendiente] = useState(null);
+  const [mostrarAlertaSalida, setMostrarAlertaSalida] = useState(false);
+  const vistasProtegidas = ['nuevo-proceso', 'inspeccion'];
+
+  const intentarNavegar = (nuevaVista) => {
+    if (nuevaVista === currentView) return;
+    
+    // Si la barra lateral superpuesta está abierta, la cerramos
+    setShowDrawer(false);
+
+    // Si estamos en una vista crítica, prevenimos la navegación y preguntamos
+    if (vistasProtegidas.includes(currentView)) {
+      setVistaPendiente(nuevaVista);
+      setMostrarAlertaSalida(true);
+    } else {
+      // Si no es crítica, navega normalmente
+      setCurrentView(nuevaVista);
+    }
+  };
+
+  const confirmarSalida = () => {
+    setCurrentView(vistaPendiente);
+    // Si salimos de una inspección sin terminar, limpiamos los datos activos temporalmente
+    setDatosProcesoActivo(null);
+    setMostrarAlertaSalida(false);
+    setVistaPendiente(null);
+
+    // === LIMPIEZA DE MEMORIA AL DESCARTAR ===
+    localStorage.removeItem('dashboardLive'); 
+    localStorage.removeItem('inspeccionActiva');
+    sessionStorage.clear();
+
+    // 👇 NUEVO: Avisarle al servidor que limpie el Dashboard Live al descartar
+    const API_URL = `http://${window.location.hostname || 'localhost'}:3001`;
+    fetch(`${API_URL}/api/live`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}) // Enviamos vacío para reiniciar
+    }).catch(err => console.log('Live limpiado (Descarte)', err));
+  };
+
+  const cancelarSalida = () => {
+    setMostrarAlertaSalida(false);
+    setVistaPendiente(null);
+  };
+  // =====================================================================
+
   const [dbData, setDbData] = useState({
     exportadoras: [],
     variedades: [],
@@ -77,15 +125,69 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    if(window.confirm('¿Estás seguro de cerrar sesión?')) {
-      setUser(null);
-      setCurrentView('home');
-      setIsCollapsed(false);
-      setShowAjustes(false);
-      setShowDrawer(false);
-      setDatosProcesoActivo(null);
+    // Si está en una vista protegida, advertir antes
+    if (vistasProtegidas.includes(currentView)) {
+      if(!window.confirm('Tienes un proceso sin guardar. ¿Estás seguro de descartarlo y cerrar sesión?')) return;
+    } else {
+      if(!window.confirm('¿Estás seguro de cerrar sesión?')) return;
     }
+    
+    // === LIMPIEZA TOTAL DE MEMORIA AL CERRAR SESIÓN ===
+    localStorage.clear(); 
+    sessionStorage.clear();
+
+    // 👇 NUEVO: Avisarle al servidor que limpie el Dashboard Live al cerrar sesión
+    const API_URL = `http://${window.location.hostname || 'localhost'}:3001`;
+    fetch(`${API_URL}/api/live`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    }).catch(err => console.log('Live limpiado (Logout)', err));
+
+    setUser(null);
+    setCurrentView('home');
+    setIsCollapsed(false);
+    setShowAjustes(false);
+    setShowDrawer(false);
+    setDatosProcesoActivo(null);
   };
+
+  // ================= MODAL DE ADVERTENCIA REUTILIZABLE =================
+  const ModalAdvertencia = mostrarAlertaSalida ? (
+    <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
+      <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl">
+        <div className="p-6">
+          <div className="w-12 h-12 bg-red-100 text-red-500 rounded-full flex items-center justify-center mb-4">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+            </svg>
+          </div>
+          <h3 className="text-lg font-black text-slate-900 mb-2">¿Seguro que deseas salir?</h3>
+          <p className="text-sm text-slate-500 leading-relaxed">
+            Tienes datos en pantalla que no han sido guardados. Si sales ahora, 
+            <span className="font-bold text-slate-700"> todo el progreso se perderá </span> 
+            y no podrás recuperarlo.
+          </p>
+        </div>
+        <div className="bg-slate-50 px-6 py-4 flex gap-3 justify-end border-t border-slate-100">
+          <button 
+            onClick={cancelarSalida} 
+            className="px-4 py-2 text-slate-600 font-bold hover:bg-slate-200 bg-white border border-slate-200 rounded-xl text-xs transition-colors"
+          >
+            No, quedarme
+          </button>
+          <button 
+            onClick={confirmarSalida} 
+            className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl text-xs transition-colors shadow-sm"
+          >
+            Sí, salir y descartar
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+  // =====================================================================
+
 
   if (!user) {
     return <Login onLogin={handleLogin} />;
@@ -104,6 +206,7 @@ export default function App() {
             procesosExistentes={dbData.procesosExistentes}
             onAbrirMenu={() => setShowDrawer(true)}
             onIniciarInspeccion={(datosGenerales) => {
+              // Aquí no se usa intentarNavegar porque es el flujo natural y correcto
               setDatosProcesoActivo(datosGenerales);
               setCurrentView('inspeccion');
             }}
@@ -114,11 +217,14 @@ export default function App() {
           <InspeccionModule 
             datosProceso={datosProcesoActivo}
             onAbrirMenu={() => setShowDrawer(true)}
-            onVolver={() => {
-              setCurrentView('home');
-              setDatosProcesoActivo(null);
-            }}
+            onVolver={() => intentarNavegar('home')} // Protegido
             onFinishedInspection={(num) => {
+              
+              // === LIMPIEZA DE MEMORIA PORQUE EL PROCESO FINALIZÓ ===
+              localStorage.removeItem('dashboardLive'); 
+              localStorage.removeItem('inspeccionActiva');
+              sessionStorage.clear();
+
               cargarDatosMaestros(); 
               setCurrentView('historial'); 
               setDatosProcesoActivo(null);
@@ -129,7 +235,7 @@ export default function App() {
         {/* AQUÍ SE INYECTA EL DASHBOARD CON EL MENÚ HABILITADO */}
         {currentView === 'dashboard' && (
           <DashboardLiveView 
-            onClose={() => setCurrentView('home')} 
+            onClose={() => intentarNavegar('home')} 
             onAbrirMenu={() => setShowDrawer(true)} 
           />
         )}
@@ -149,11 +255,11 @@ export default function App() {
               </div>
 
               <nav className="flex-1 py-6 px-4 space-y-2 overflow-y-auto custom-scrollbar">
-                <button onClick={() => { setShowDrawer(false); setCurrentView('nuevo-proceso'); }} className="w-full flex items-center px-4 py-3 rounded-xl bg-orange-50 text-[#E96008] font-bold text-left text-sm">
+                <button onClick={() => intentarNavegar('nuevo-proceso')} className="w-full flex items-center px-4 py-3 rounded-xl bg-orange-50 text-[#E96008] font-bold text-left text-sm">
                   <PlusCircle className="w-5 h-5 text-[#E96008] shrink-0 mr-3" />
                   <span>Crear Proceso</span>
                 </button>
-                <button onClick={() => { setShowDrawer(false); setCurrentView('historial'); }} className="w-full flex items-center px-4 py-3 rounded-xl text-slate-600 hover:bg-slate-50 font-semibold text-left text-sm">
+                <button onClick={() => intentarNavegar('historial')} className="w-full flex items-center px-4 py-3 rounded-xl text-slate-600 hover:bg-slate-50 font-semibold text-left text-sm">
                   <ClipboardList className="w-5 h-5 text-blue-600 shrink-0 mr-3" />
                   <span>Historial</span>
                 </button>
@@ -161,7 +267,7 @@ export default function App() {
                 {user.role === 'admin' && (
                   <>
                     <div className="pt-4 mt-2 mb-2 border-t border-slate-100"><p className="px-4 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Administración</p></div>
-                    <button onClick={() => { setShowDrawer(false); setCurrentView('dashboard'); }} className="w-full flex items-center px-4 py-3 rounded-xl text-slate-600 hover:bg-slate-50 font-semibold text-left text-sm">
+                    <button onClick={() => intentarNavegar('dashboard')} className="w-full flex items-center px-4 py-3 rounded-xl text-slate-600 hover:bg-slate-50 font-semibold text-left text-sm">
                       <LayoutDashboard className="w-5 h-5 text-[#E96008] shrink-0 mr-3" /><span>Dashboard Live</span>
                     </button>
                     <div className="flex flex-col">
@@ -171,10 +277,10 @@ export default function App() {
                       </button>
                       {showAjustes && (
                         <div className="mt-1 pl-12 flex flex-col space-y-1">
-                          <button onClick={() => { setShowDrawer(false); setCurrentView('ajustes-exportadoras'); }} className="text-left text-sm py-2 px-3 text-slate-500 hover:text-slate-900 rounded-lg">Exportadoras</button>
-                          <button onClick={() => { setShowDrawer(false); setCurrentView('ajustes-variedades'); }} className="text-left text-sm py-2 px-3 text-slate-500 hover:text-slate-900 rounded-lg">Variedades</button>
-                          <button onClick={() => { setShowDrawer(false); setCurrentView('ajustes-huertos'); }} className="text-left text-sm py-2 px-3 text-slate-500 hover:text-slate-900 rounded-lg">Productores/Huertos</button>
-                          <button onClick={() => { setShowDrawer(false); setCurrentView('ajustes-parametros'); }} className="text-left text-sm py-2 px-3 text-slate-500 hover:text-slate-900 rounded-lg">Parámetros Calificación</button>
+                          <button onClick={() => intentarNavegar('ajustes-exportadoras')} className="text-left text-sm py-2 px-3 text-slate-500 hover:text-slate-900 rounded-lg">Exportadoras</button>
+                          <button onClick={() => intentarNavegar('ajustes-variedades')} className="text-left text-sm py-2 px-3 text-slate-500 hover:text-slate-900 rounded-lg">Variedades</button>
+                          <button onClick={() => intentarNavegar('ajustes-huertos')} className="text-left text-sm py-2 px-3 text-slate-500 hover:text-slate-900 rounded-lg">Productores/Huertos</button>
+                          <button onClick={() => intentarNavegar('ajustes-parametros')} className="text-left text-sm py-2 px-3 text-slate-500 hover:text-slate-900 rounded-lg">Parámetros Calificación</button>
                         </div>
                       )}
                     </div>
@@ -197,12 +303,14 @@ export default function App() {
             </aside>
           </div>
         )}
+
+        {ModalAdvertencia}
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen bg-[#F4F7FA] font-sans overflow-hidden">
+    <div className="flex h-screen bg-[#F4F7FA] font-sans overflow-hidden relative">
       
       <aside className={`${isCollapsed ? 'w-20' : 'w-[260px]'} bg-white border-r border-slate-200 flex flex-col shadow-sm z-20 shrink-0 transition-all duration-300 relative`}>
         <button onClick={() => setIsCollapsed(!isCollapsed)} className="absolute -right-3 top-7 bg-white border border-slate-200 text-slate-600 rounded-full p-1 shadow-md hover:bg-slate-50 transition-colors z-30" title={isCollapsed ? "Expandir menú" : "Contraer menú"}>
@@ -214,12 +322,12 @@ export default function App() {
         </div>
 
         <nav className="flex-1 py-6 px-3 space-y-2 overflow-y-auto custom-scrollbar">
-          <button onClick={() => setCurrentView('nuevo-proceso')} title="Crear Proceso" className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'px-4'} py-3 rounded-xl transition-all text-left ${currentView === 'nuevo-proceso' ? 'bg-orange-50 text-[#E96008] font-bold' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'}`}>
+          <button onClick={() => intentarNavegar('nuevo-proceso')} title="Crear Proceso" className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'px-4'} py-3 rounded-xl transition-all text-left ${currentView === 'nuevo-proceso' ? 'bg-orange-50 text-[#E96008] font-bold' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'}`}>
             <PlusCircle className="w-6 h-6 text-green-600 shrink-0" />
             {!isCollapsed && <span className="text-sm truncate ml-3 font-semibold">Crear Proceso</span>}
           </button>
           
-          <button onClick={() => { setCurrentView('historial'); setIsCollapsed(true); }} title="Historial" className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'px-4'} py-3 rounded-xl transition-all text-left ${currentView === 'historial' ? 'bg-orange-50 text-[#E96008] font-bold' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'}`}>
+          <button onClick={() => intentarNavegar('historial')} title="Historial" className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'px-4'} py-3 rounded-xl transition-all text-left ${currentView === 'historial' ? 'bg-orange-50 text-[#E96008] font-bold' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'}`}>
             <ClipboardList className="w-6 h-6 text-blue-600 shrink-0" />
             {!isCollapsed && <span className="text-sm truncate ml-3">Historial</span>}
           </button>
@@ -229,7 +337,7 @@ export default function App() {
               <div className="pt-4 mt-2 mb-2 border-t border-slate-100">
                 {!isCollapsed && <p className="px-4 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Administración</p>}
               </div>
-              <button onClick={() => setCurrentView('dashboard')} title="Dashboard Live" className="w-full flex items-center px-4 py-3 rounded-xl text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium transition-all text-left">
+              <button onClick={() => intentarNavegar('dashboard')} title="Dashboard Live" className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'px-4'} py-3 rounded-xl transition-all text-left ${currentView === 'dashboard' ? 'bg-orange-50 text-[#E96008] font-bold' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'}`}>
                 <LayoutDashboard className="w-6 h-6 text-[#E96008] shrink-0" />
                 {!isCollapsed && <span className="text-sm truncate ml-3">Dashboard Live</span>}
               </button>
@@ -241,10 +349,10 @@ export default function App() {
                 </button>
                 {showAjustes && !isCollapsed && (
                   <div className="mt-1 pl-12 flex flex-col space-y-1 animate-fade-in">
-                    <button onClick={() => setCurrentView('ajustes-exportadoras')} className={`text-left text-sm py-2 px-3 rounded-lg transition-colors ${currentView === 'ajustes-exportadoras' ? 'text-[#E96008] font-bold bg-orange-50' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'}`}>Exportadoras</button>
-                    <button onClick={() => setCurrentView('ajustes-variedades')} className={`text-left text-sm py-2 px-3 rounded-lg transition-colors ${currentView === 'ajustes-variedades' ? 'text-[#E96008] font-bold bg-orange-50' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'}`}>Variedades</button>
-                    <button onClick={() => setCurrentView('ajustes-huertos')} className={`text-left text-sm py-2 px-3 rounded-lg transition-colors ${currentView === 'ajustes-huertos' ? 'text-[#E96008] font-bold bg-orange-50' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'}`}>Productores/Huertos</button>
-                    <button onClick={() => setCurrentView('ajustes-parametros')} className={`text-left text-sm py-2 px-3 rounded-lg transition-colors ${currentView === 'ajustes-parametros' ? 'text-[#E96008] font-bold bg-orange-50' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'}`}>Parámetros Calificación</button>
+                    <button onClick={() => intentarNavegar('ajustes-exportadoras')} className={`text-left text-sm py-2 px-3 rounded-lg transition-colors ${currentView === 'ajustes-exportadoras' ? 'text-[#E96008] font-bold bg-orange-50' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'}`}>Exportadoras</button>
+                    <button onClick={() => intentarNavegar('ajustes-variedades')} className={`text-left text-sm py-2 px-3 rounded-lg transition-colors ${currentView === 'ajustes-variedades' ? 'text-[#E96008] font-bold bg-orange-50' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'}`}>Variedades</button>
+                    <button onClick={() => intentarNavegar('ajustes-huertos')} className={`text-left text-sm py-2 px-3 rounded-lg transition-colors ${currentView === 'ajustes-huertos' ? 'text-[#E96008] font-bold bg-orange-50' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'}`}>Productores/Huertos</button>
+                    <button onClick={() => intentarNavegar('ajustes-parametros')} className={`text-left text-sm py-2 px-3 rounded-lg transition-colors ${currentView === 'ajustes-parametros' ? 'text-[#E96008] font-bold bg-orange-50' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'}`}>Parámetros Calificación</button>
                   </div>
                 )}
               </div>
@@ -308,6 +416,8 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {ModalAdvertencia}
     </div>
   );
 }

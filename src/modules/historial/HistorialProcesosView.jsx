@@ -1,8 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Search, Filter, MoreVertical, Edit3, Trash2, 
-  BarChart2, ChevronLeft, ChevronRight, ArrowLeft, Save, AlertTriangle, Plus, X, Check
+  BarChart2, ChevronLeft, ChevronRight, ArrowLeft, Save, AlertTriangle, Plus, X, Check, Download
 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas-pro';
+import PlantillaInforme from './PlantillaInforme';
 
 const defectosCalidadBase = {
   'Frutos deformes / dobles': 0, 'Daños de trips': 0, 'Golpe de sol': 0, 'Manchas': 0, 'Sutura (severa)': 0, 'Herida cicatrizada': 0,
@@ -42,13 +45,17 @@ export default function HistorialProcesosView({ onVerResumen }) {
 
   // Vistas: 'lista' | 'editar'
   const [vistaActual, setVistaActual] = useState('lista');
-  
-  // Estado para la edición completa del proceso
   const [procesoEnEdicion, setProcesoEnEdicion] = useState(null);
-
-  // Modal para la edición detallada de una caja individual
   const [cajaIndexEditandoModal, setCajaIndexEditandoModal] = useState(null);
   const [tabDefectosModal, setTabDefectosModal] = useState('calidad');
+
+  // ================= ESTADOS PARA REPORTE PDF Y VISTA PREVIA =================
+  const [datosReporte, setDatosReporte] = useState(null);
+  const [generandoReporteId, setGenerandoReporteId] = useState(null);
+  const [datosVistaPrevia, setDatosVistaPrevia] = useState(null);
+  const [cargandoVistaPreviaId, setCargandoVistaPreviaId] = useState(null);
+  const reporteRef = useRef();
+  // ==============================================================================
 
   const getApiUrl = () => `http://${window.location.hostname || 'localhost'}:3001`;
 
@@ -89,7 +96,6 @@ export default function HistorialProcesosView({ onVerResumen }) {
     cargarDatos();
   }, []);
 
-  // Reiniciar paginación al cambiar cualquier filtro
   useEffect(() => {
     setPaginaActual(1);
   }, [filtroNumProceso, filtroCsgHuerto, filtroVariedad, filtroFecha, filtroCalificacion]);
@@ -167,6 +173,52 @@ export default function HistorialProcesosView({ onVerResumen }) {
     const pCond = f ? ((tCond / f) * 100).toFixed(1) : '0.0';
     const pExp = f ? Math.max(0, 100 - (tCal / f) * 100 - (tCond / f) * 100).toFixed(1) : '100.0';
     return { tCal, tCond, pCal, pCond, pExp };
+  };
+
+  // ================= FUNCIONES PARA INFORME PDF Y VISTA PREVIA =================
+  
+  // 1. ABRIR VISTA PREVIA (Usando los datos que ya están en la tabla)
+  const abrirVistaPrevia = (procesoId) => {
+    // Busca el proceso directamente de la lista ya cargada
+    const procesoEncontrado = procesos.find(p => p.id === procesoId || p._id === procesoId);
+    setDatosVistaPrevia(procesoEncontrado);
+  };
+
+  // 2. DESCARGAR PDF ROBUSTO (Usando los datos locales)
+  const descargarPDF = async (procesoId) => {
+    setGenerandoReporteId(procesoId);
+    try {
+      const procesoEncontrado = procesos.find(p => p.id === procesoId || p._id === procesoId);
+      setDatosReporte(procesoEncontrado);
+
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      if (!reporteRef.current) throw new Error("El componente PDF no se pudo montar.");
+
+      const canvas = await html2canvas(reporteRef.current, { 
+        scale: 2, 
+        useCORS: true,
+        allowTaint: true,
+        logging: false
+      });
+      
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'letter');
+      
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`Informe_Proceso_${procesoEncontrado.numProceso || procesoId}.pdf`);
+
+    } catch (error) {
+      console.error("Error exacto al generar PDF:", error);
+      alert(`Error técnico: ${error.message}`);
+    } finally {
+      setDatosReporte(null);
+      setGenerandoReporteId(null);
+      setMenuProcesoAbiertoId(null);
+    }
   };
 
   const abrirEdicionProceso = (proceso) => {
@@ -332,25 +384,19 @@ export default function HistorialProcesosView({ onVerResumen }) {
     }
   };
 
-  // Lógica de Filtrado Completo
   const filtrados = procesos.filter(p => {
     if (!p) return false;
-
-    // Filtro 1: Número de Proceso
     const numP = (p.numProceso || '').toString().toLowerCase();
     const queryNumP = filtroNumProceso.toLowerCase();
     if (queryNumP && !numP.includes(queryNumP)) return false;
 
-    // Filtro 2: Huerto o CSG
     const csgStr = (p.csg || '').toLowerCase();
     const prodStr = (p.productor || '').toLowerCase();
     const queryHuerto = filtroCsgHuerto.toLowerCase();
     if (queryHuerto && !csgStr.includes(queryHuerto) && !prodStr.includes(queryHuerto)) return false;
 
-    // Filtro 3: Variedad
     if (filtroVariedad && p.variedad !== filtroVariedad) return false;
 
-    // Filtro 4: Fecha (El input type="date" devuelve "YYYY-MM-DD")
     if (filtroFecha) {
       const fechaDB = p.created_at || p.createdAt || p.fecha || p.fecha_creacion || p.date;
       if (!fechaDB) return false;
@@ -363,7 +409,6 @@ export default function HistorialProcesosView({ onVerResumen }) {
       if (fechaDBStr !== filtroFecha) return false;
     }
 
-    // Filtro 5: Calificación (Nota)
     if (filtroCalificacion) {
       const met = calcularMetricas(p);
       if (met.nota !== filtroCalificacion) return false;
@@ -398,7 +443,6 @@ export default function HistorialProcesosView({ onVerResumen }) {
           <div className="flex flex-col gap-4 w-full">
             <div className="flex flex-col md:flex-row gap-3">
               
-              {/* Buscador 1: N° Proceso */}
               <div className="relative flex-1">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
@@ -410,7 +454,6 @@ export default function HistorialProcesosView({ onVerResumen }) {
                 />
               </div>
 
-              {/* Buscador 2: CSG o Huerto */}
               <div className="relative flex-1">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                 <input
@@ -422,7 +465,6 @@ export default function HistorialProcesosView({ onVerResumen }) {
                 />
               </div>
 
-              {/* Botón Filtros Avanzados */}
               <button
                 onClick={() => setMostrarFiltrosAvanzados(!mostrarFiltrosAvanzados)}
                 className={`h-12 px-6 flex items-center justify-center gap-2 border rounded-2xl font-bold text-sm transition-colors shrink-0 ${
@@ -436,7 +478,6 @@ export default function HistorialProcesosView({ onVerResumen }) {
               </button>
             </div>
 
-            {/* Panel de Filtros Avanzados Desplegable */}
             {mostrarFiltrosAvanzados && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-5 rounded-2xl border border-slate-200 animate-fade-in shadow-inner">
                 <div>
@@ -577,15 +618,27 @@ export default function HistorialProcesosView({ onVerResumen }) {
                                   <span>Editar proceso</span>
                                 </button>
 
+                                {/* BOTÓN VISTA PREVIA */}
                                 <button 
                                   onClick={() => {
                                     setMenuProcesoAbiertoId(null);
-                                    if (onVerResumen) onVerResumen(proc);
+                                    abrirVistaPrevia(proc.id);
                                   }} 
-                                  className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-slate-50 text-xs font-bold text-slate-700 transition-colors"
+                                  disabled={cargandoVistaPreviaId === proc.id}
+                                  className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-orange-50 text-xs font-bold text-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                   <BarChart2 className="w-4 h-4 text-[#E96008]" />
-                                  <span>Ver resumen de proceso</span>
+                                  <span>{cargandoVistaPreviaId === proc.id ? 'Cargando...' : 'Ver resumen de proceso'}</span>
+                                </button>
+
+                                {/* BOTÓN DESCARGAR PDF */}
+                                <button 
+                                  onClick={() => descargarPDF(proc.id)} 
+                                  disabled={generandoReporteId === proc.id}
+                                  className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-green-50 text-xs font-bold text-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  <Download className="w-4 h-4 text-green-600" />
+                                  <span>{generandoReporteId === proc.id ? 'Generando...' : 'Descargar Informe PDF'}</span>
                                 </button>
                                 
                                 <button 
@@ -660,6 +713,56 @@ export default function HistorialProcesosView({ onVerResumen }) {
             </div>
           </div>
         )}
+
+{/* ================= MODAL DE VISTA PREVIA DEL INFORME ================= */}
+        {datosVistaPrevia && (
+          <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 animate-fade-in">
+            <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden relative">
+              
+              {/* Encabezado del Modal */}
+              <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-white z-10">
+                <div>
+                  <h3 className="font-black text-slate-900 text-lg">Vista Previa del Informe</h3>
+                  <p className="text-xs text-slate-500">Proceso N° {datosVistaPrevia.numProceso || datosVistaPrevia.id}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button 
+                    // AQUÍ ESTABA EL ERROR: Cambiado de proceso_id a id
+                    onClick={() => descargarPDF(datosVistaPrevia.id || datosVistaPrevia._id)}
+                    disabled={generandoReporteId === (datosVistaPrevia.id || datosVistaPrevia._id)}
+                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-sm transition-colors disabled:opacity-50"
+                  >
+                    <Download className="w-4 h-4" /> 
+                    {generandoReporteId === (datosVistaPrevia.id || datosVistaPrevia._id) ? 'Generando...' : 'Descargar PDF'}
+                  </button>
+                  <button 
+                    onClick={() => setDatosVistaPrevia(null)} 
+                    className="p-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Contenedor escroleable donde se muestra la Plantilla */}
+              <div className="flex-1 overflow-auto bg-slate-200 p-6 flex justify-center custom-scrollbar">
+                <div className="shadow-2xl">
+                  <PlantillaInforme datos={datosVistaPrevia} />
+                </div>
+              </div>
+              
+            </div>
+          </div>
+        )}
+        {/* ==================================================================== */}
+
+        {/* ================= COMPONENTE OCULTO PARA EL PDF ================= */}
+        <div style={{ position: 'fixed', top: 0, left: 0, zIndex: -1000, opacity: 0.01, pointerEvents: 'none' }}>
+          {datosReporte && (
+            <PlantillaInforme ref={reporteRef} datos={datosReporte} />
+          )}
+        </div>
+        {/* ================================================================== */}
 
       </div>
     );
