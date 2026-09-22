@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
-import { Plus, Trash2 } from 'lucide-react'; // <-- Se eliminó 'Apple' de aquí
+import { Plus, Trash2 } from 'lucide-react';
 
 export default function GestionVariedades({ variedades, setVariedades }) {
   const [nombreNueva, setNombreNueva] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const API_URL = `http://${window.location.hostname || 'localhost'}:3001`;
+  // 👇 NUEVO: Variable inteligente que detecta si está en Producción o Desarrollo
+  const API_URL = import.meta.env.PROD 
+    ? 'https://evap.maq.goldanda.cl' 
+    : `http://${window.location.hostname || 'localhost'}:3001`;
 
   const agregarVariedad = async (e) => {
     e.preventDefault();
@@ -75,7 +78,6 @@ export default function GestionVariedades({ variedades, setVariedades }) {
 
       {/* NUEVO DISEÑO: FORMULARIO DE INGRESO */}
       <form onSubmit={agregarVariedad} className="bg-slate-50/70 border border-slate-200 rounded-2xl p-5 mb-6">
-        {/* Se eliminó el ícono de la manzana de esta línea */}
         <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
           Registrar Nueva Variedad
         </h3>

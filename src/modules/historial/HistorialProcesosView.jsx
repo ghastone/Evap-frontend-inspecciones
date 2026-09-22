@@ -57,16 +57,19 @@ export default function HistorialProcesosView({ onVerResumen }) {
   const reporteRef = useRef();
   // ==============================================================================
 
-  const getApiUrl = () => `http://${window.location.hostname || 'localhost'}:3001`;
+  // 👇 NUEVO: Variable inteligente que detecta si está en Producción o Desarrollo
+  const API_URL = import.meta.env.PROD 
+    ? 'https://evap.maq.goldanda.cl' 
+    : `http://${window.location.hostname || 'localhost'}:3001`;
 
   const cargarDatos = async () => {
     setCargando(true);
     try {
       const [inspRes, expRes, varRes, hueRes] = await Promise.all([
-        fetch(`${getApiUrl()}/api/inspecciones`).catch(() => null),
-        fetch(`${getApiUrl()}/api/exportadoras`).catch(() => null),
-        fetch(`${getApiUrl()}/api/variedades`).catch(() => null),
-        fetch(`${getApiUrl()}/api/huertos`).catch(() => null)
+        fetch(`${API_URL}/api/inspecciones`).catch(() => null),
+        fetch(`${API_URL}/api/exportadoras`).catch(() => null),
+        fetch(`${API_URL}/api/variedades`).catch(() => null),
+        fetch(`${API_URL}/api/huertos`).catch(() => null)
       ]);
 
       if (inspRes && inspRes.ok) {
@@ -271,7 +274,7 @@ export default function HistorialProcesosView({ onVerResumen }) {
         cajas: procesoEnEdicion.cajas || []
       };
 
-      const response = await fetch(`${getApiUrl()}/api/inspecciones/${procesoEnEdicion.id}`, {
+      const response = await fetch(`${API_URL}/api/inspecciones/${procesoEnEdicion.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -369,7 +372,7 @@ export default function HistorialProcesosView({ onVerResumen }) {
     const id = procesoAEliminar.id || procesoAEliminar._id;
 
     try {
-      const response = await fetch(`${getApiUrl()}/api/inspecciones/${id}`, { method: 'DELETE' });
+      const response = await fetch(`${API_URL}/api/inspecciones/${id}`, { method: 'DELETE' });
       if (response.ok) {
         setProcesos(prev => prev.filter(p => (p.id || p._id) !== id));
         if (procesoSeleccionado?.id === id) setProcesoSeleccionado(null);
@@ -727,7 +730,6 @@ export default function HistorialProcesosView({ onVerResumen }) {
                 </div>
                 <div className="flex items-center gap-3">
                   <button 
-                    // AQUÍ ESTABA EL ERROR: Cambiado de proceso_id a id
                     onClick={() => descargarPDF(datosVistaPrevia.id || datosVistaPrevia._id)}
                     disabled={generandoReporteId === (datosVistaPrevia.id || datosVistaPrevia._id)}
                     className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-sm transition-colors disabled:opacity-50"

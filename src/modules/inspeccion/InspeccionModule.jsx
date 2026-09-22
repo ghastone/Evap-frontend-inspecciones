@@ -43,19 +43,22 @@ export default function InspeccionModule({
   const hideSpinners = "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
   const headerCompleto = cajaActual.frutos !== '' && cajaActual.calibre !== '' && cajaActual.color !== '' && cajaActual.brix !== '';
 
-  const getApiUrl = () => `http://${window.location.hostname || 'localhost'}:3001`;
+  // 👇 NUEVO: Variable inteligente que detecta si está en Producción o Desarrollo
+  const API_URL = import.meta.env.PROD 
+    ? 'https://evap.maq.goldanda.cl' 
+    : `http://${window.location.hostname || 'localhost'}:3001`;
 
   useEffect(() => {
     const payload = {
       numProceso, exportadora: exportadoraSel, productor: productorNombre, variedad: variedadSel, csg: csgSel,
       cajas: cajas, cajaActual: headerCompleto ? cajaActual : null 
     };
-    fetch(`${getApiUrl()}/api/live`, {
+    fetch(`${API_URL}/api/live`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     }).catch(err => console.log('Error enviando datos en vivo:', err));
-  }, [cajas, cajaActual, headerCompleto, numProceso, exportadoraSel, productorNombre, variedadSel, csgSel]);
+  }, [cajas, cajaActual, headerCompleto, numProceso, exportadoraSel, productorNombre, variedadSel, csgSel, API_URL]);
 
   const actualizarDefecto = (tipo, def, valor) => {
     const val = valor === '' ? '' : Math.max(0, parseInt(valor) || 0);
@@ -165,7 +168,7 @@ export default function InspeccionModule({
 
   const confirmarCancelarProceso = async () => {
     try {
-      await fetch(`${getApiUrl()}/api/live`, { 
+      await fetch(`${API_URL}/api/live`, { 
         method: 'POST', 
         headers: { 'Content-Type': 'application/json' }, 
         body: JSON.stringify({}) 
@@ -217,12 +220,12 @@ export default function InspeccionModule({
 
     try {
       const payload = { numProceso, exportadora: exportadoraSel, csg: csgSel, variedad: variedadSel, estado: estadoGlobal, cajas: cajasFinales };
-      const response = await fetch(`${getApiUrl()}/api/inspecciones`, {
+      const response = await fetch(`${API_URL}/api/inspecciones`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
       });
       const data = await response.json(); 
       if (response.ok) {
-        await fetch(`${getApiUrl()}/api/live`, { 
+        await fetch(`${API_URL}/api/live`, { 
           method: 'POST', 
           headers: { 'Content-Type': 'application/json' }, 
           body: JSON.stringify({}) 

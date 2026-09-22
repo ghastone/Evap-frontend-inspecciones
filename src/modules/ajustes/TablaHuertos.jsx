@@ -10,7 +10,10 @@ export default function TablaHuertos({ exportadoras = [] }) {
   const [modoEdicion, setModoEdicion] = useState(false);
   const [formHuerto, setFormHuerto] = useState({ productor: '', huerto: '', csg: '', exportadora: '' });
 
-  const API_URL = `http://${window.location.hostname || 'localhost'}:3001`;
+  // 👇 NUEVO: Variable inteligente que detecta si está en Producción o Desarrollo
+  const API_URL = import.meta.env.PROD 
+    ? 'https://evap.maq.goldanda.cl' 
+    : `http://${window.location.hostname || 'localhost'}:3001`;
 
   // 1. Cargar los huertos de la base de datos al inicio
   const cargarHuertos = async () => {

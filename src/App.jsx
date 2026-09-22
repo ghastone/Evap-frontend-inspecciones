@@ -59,12 +59,17 @@ export default function App() {
     sessionStorage.clear();
 
     // 👇 NUEVO: Avisarle al servidor que limpie el Dashboard Live al descartar
-    const API_URL = `http://${window.location.hostname || 'localhost'}:3001`;
-    fetch(`${API_URL}/api/live`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}) // Enviamos vacío para reiniciar
-    }).catch(err => console.log('Live limpiado (Descarte)', err));
+
+// Vite decidirá automáticamente qué ruta usar:
+const API_URL = import.meta.env.PROD 
+  ? 'https://evap.maq.goldanda.cl' 
+  : `http://${window.location.hostname || 'localhost'}:3001`;
+
+fetch(`${API_URL}/api/live`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({}) // Enviamos vacío para reiniciar
+}).catch(err => console.log('Live limpiado (Descarte)', err));
   };
 
   const cancelarSalida = () => {
@@ -80,9 +85,12 @@ export default function App() {
     procesosExistentes: []
   });
 
-  const cargarDatosMaestros = async () => {
+const cargarDatosMaestros = async () => {
     try {
-      const API_URL = `http://${window.location.hostname || 'localhost'}:3001`;
+      // Usamos el validador de Vite para saber si estamos en Producción o Desarrollo
+      const API_URL = import.meta.env.PROD 
+        ? 'https://evap.maq.goldanda.cl' 
+        : `http://${window.location.hostname || 'localhost'}:3001`;
       
       const [expRes, varRes, hueRes, inspRes] = await Promise.all([
         fetch(`${API_URL}/api/exportadoras`),
@@ -136,8 +144,11 @@ export default function App() {
     localStorage.clear(); 
     sessionStorage.clear();
 
-    // 👇 NUEVO: Avisarle al servidor que limpie el Dashboard Live al cerrar sesión
-    const API_URL = `http://${window.location.hostname || 'localhost'}:3001`;
+// 👇 NUEVO: Avisarle al servidor que limpie el Dashboard Live al cerrar sesión
+    const API_URL = import.meta.env.PROD 
+      ? 'https://evap.maq.goldanda.cl' 
+      : `http://${window.location.hostname || 'localhost'}:3001`;
+      
     fetch(`${API_URL}/api/live`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

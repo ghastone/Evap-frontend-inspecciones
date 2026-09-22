@@ -101,6 +101,11 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
   // Estado para controlar la pantalla completa y el menú lateral
   const [isFullScreen, setIsFullScreen] = useState(true);
 
+  // 👇 NUEVO: Variable inteligente que detecta si está en Producción o Desarrollo
+  const API_URL = import.meta.env.PROD 
+    ? 'https://evap.maq.goldanda.cl' 
+    : `http://${window.location.hostname || 'localhost'}:3001`;
+
   const procesarDatosVivos = (rawData) => {
     if (!rawData || !rawData.numProceso) return emptyData;
     
@@ -193,7 +198,7 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
 
     // 3. Intervalo de consulta al servidor
     const interval = setInterval(() => {
-      fetch('http://localhost:3001/api/live')
+      fetch(`${API_URL}/api/live`)
         .then(res => res.json())
         .then(rawData => {
           if (rawData && rawData.numProceso) {

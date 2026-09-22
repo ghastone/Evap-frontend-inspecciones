@@ -5,6 +5,9 @@ import { VitePWA } from 'vite-plugin-pwa'
 import obfuscatorPlugin from 'vite-plugin-javascript-obfuscator'
 
 export default defineConfig({
+  server: {
+    allowedHosts: true
+  },
   plugins: [
     tailwindcss(), // Plugin nativo de Tailwind v4
     react(),
