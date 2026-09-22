@@ -15,8 +15,49 @@ const pool = new Pool({
   port: process.env.DB_PORT,
 });
 
+// Conectar a la DB y asegurar que existan las tablas necesarias
 pool.connect()
-  .then(() => console.log('✅ ¡Conectado a la base de datos PostgreSQL en', process.env.DB_HOST, '!'))
+  .then(async (client) => {
+    console.log('✅ ¡Conectado a la base de datos PostgreSQL en', process.env.DB_HOST, '!');
+    try {
+      // Auto-crear la tabla para guardar parámetros en formato JSON si no existe
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS configuraciones (
+            id SERIAL PRIMARY KEY,
+            clave VARCHAR(100) UNIQUE NOT NULL,
+            valor JSONB NOT NULL
+        );
+      `);
+      console.log('✅ Tabla de configuraciones verificada/creada.');
+
+      // Auto-crear la tabla de usuarios si no existe
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id SERIAL PRIMARY KEY,
+            username VARCHAR(100) UNIQUE NOT NULL,
+            password VARCHAR(255) NOT NULL,
+            role VARCHAR(50) NOT NULL DEFAULT 'qc',
+            permisos JSONB NOT NULL DEFAULT '{}'::jsonb
+        );
+      `);
+      console.log('✅ Tabla de usuarios verificada/creada.');
+
+      // Insertar usuario Admin inicial por defecto si la tabla está vacía
+      const checkAdmin = await client.query('SELECT COUNT(*) FROM usuarios');
+      if (parseInt(checkAdmin.rows[0].count, 10) === 0) {
+        await client.query(`
+          INSERT INTO usuarios (username, password, role, permisos)
+          VALUES ('admin', 'admin123', 'admin', '{"crear_proceso":true,"editar_informes":true,"ver_dashboard":true,"ver_historial":true,"gestionar_ajustes":true}'::jsonb)
+        `);
+        console.log('👤 Usuario "admin" inicial creado con éxito (Clave: admin123).');
+      }
+
+    } catch (err) {
+      console.error('❌ Error creando/verificando tablas en PostgreSQL:', err);
+    } finally {
+      client.release();
+    }
+  })
   .catch(err => console.error('❌ Error de conexión a la base de datos', err.stack));
 
 // ==========================================
@@ -36,6 +77,125 @@ app.post('/api/live', (req, res) => {
 
 app.get('/api/live', (req, res) => {
   res.json(currentLiveProcess || { status: 'waiting' });
+});
+
+// ==========================================
+// AUTENTICACIÓN (LOGIN)
+// ==========================================
+app.post('/api/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: 'Usuario y contraseña requeridos' });
+    }
+
+    const result = await pool.query(
+      'SELECT id, username, role, permisos FROM usuarios WHERE LOWER(username) = LOWER($1) AND password = $2',
+      [username.trim(), password.trim()]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ success: false, message: 'Usuario o contraseña incorrectos' });
+    }
+
+    res.json({ success: true, user: result.rows[0] });
+  } catch (error) {
+    console.error('Error en /api/login:', error);
+    res.status(500).json({ success: false, message: 'Error interno del servidor en el login' });
+  }
+});
+
+// ==========================================
+// GESTIÓN DE USUARIOS
+// ==========================================
+
+// Obtener todos los usuarios (excluyendo contraseñas por seguridad)
+app.get('/api/usuarios', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT id, username, role, permisos FROM usuarios ORDER BY id ASC;');
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error en GET /api/usuarios:', error);
+    res.status(500).json({ message: 'Error al obtener los usuarios' });
+  }
+});
+
+// Crear un nuevo usuario
+app.post('/api/usuarios', async (req, res) => {
+  try {
+    const { username, password, role, permisos } = req.body;
+
+    if (!username || !password) {
+      return res.status(400).json({ message: 'El usuario y la contraseña son obligatorios' });
+    }
+
+    const permisosJson = JSON.stringify(permisos || {});
+
+    const result = await pool.query(
+      'INSERT INTO usuarios (username, password, role, permisos) VALUES ($1, $2, $3, $4::jsonb) RETURNING id, username, role, permisos',
+      [username.trim(), password.trim(), role || 'qc', permisosJson]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error al crear usuario:', error);
+    if (error.code === '23505') {
+      return res.status(400).json({ message: 'El nombre de usuario ya existe' });
+    }
+    res.status(500).json({ message: 'Error interno al guardar usuario' });
+  }
+});
+
+// Editar usuario existente
+app.put('/api/usuarios/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { username, password, role, permisos } = req.body;
+    const permisosJson = JSON.stringify(permisos || {});
+
+    let result;
+    if (password && password.trim() !== '') {
+      result = await pool.query(
+        'UPDATE usuarios SET username = $1, password = $2, role = $3, permisos = $4::jsonb WHERE id = $5 RETURNING id, username, role, permisos',
+        [username.trim(), password.trim(), role, permisosJson, id]
+      );
+    } else {
+      result = await pool.query(
+        'UPDATE usuarios SET username = $1, role = $2, permisos = $3::jsonb WHERE id = $4 RETURNING id, username, role, permisos',
+        [username.trim(), role, permisosJson, id]
+      );
+    }
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'No se encontró el usuario para editar' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error al actualizar usuario:', error);
+    if (error.code === '23505') {
+      return res.status(400).json({ message: 'El nombre de usuario ya existe en otro registro' });
+    }
+    res.status(500).json({ message: 'Error interno al actualizar usuario' });
+  }
+});
+
+// Eliminar usuario
+app.delete('/api/usuarios/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query('DELETE FROM usuarios WHERE id = $1', [id]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'No se encontró el usuario para eliminar' });
+    }
+
+    res.json({ success: true, message: 'Usuario eliminado exitosamente' });
+  } catch (error) {
+    console.error('Error al eliminar usuario:', error);
+    res.status(500).json({ message: 'Error interno al eliminar usuario' });
+  }
 });
 
 // ==========================================
@@ -61,7 +221,6 @@ app.post('/api/huertos', async (req, res) => {
   try {
     const { productor, huerto, csg, exportadora } = req.body;
     
-    // Primero, buscamos el ID de la exportadora según el nombre que viene del frontend
     const expRes = await pool.query('SELECT id FROM exportadoras WHERE nombre = $1', [exportadora]);
     
     if (expRes.rows.length === 0) {
@@ -76,7 +235,7 @@ app.post('/api/huertos', async (req, res) => {
     res.status(201).json({ success: true, data: result.rows[0] });
   } catch (error) {
     console.error('Error al guardar huerto:', error);
-    if (error.code === '23505') { // Error de unique constraint en PostgreSQL
+    if (error.code === '23505') {
       return res.status(400).json({ error: 'El código CSG ya existe en otro huerto' });
     }
     res.status(500).json({ error: 'Error interno al guardar huerto' });
@@ -89,7 +248,6 @@ app.put('/api/huertos/:id', async (req, res) => {
     const { id } = req.params;
     const { productor, huerto, csg, exportadora } = req.body;
     
-    // Buscar el ID de la nueva exportadora seleccionada
     const expRes = await pool.query('SELECT id FROM exportadoras WHERE nombre = $1', [exportadora]);
 
     if (expRes.rows.length === 0) {
@@ -125,11 +283,9 @@ app.delete('/api/huertos/:id', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Error al eliminar huerto:', error);
-    // Si da error por llave foránea (tiene procesos asociados)
     res.status(500).json({ error: 'No puedes eliminar este huerto porque ya tiene inspecciones y procesos guardados en el historial.' });
   }
 });
-
 
 // ==========================================
 // GESTIÓN DE EXPORTADORAS
@@ -238,6 +394,46 @@ app.delete('/api/variedades/:nombre', async (req, res) => {
   } catch (error) {
     console.error('Error al eliminar variedad:', error);
     res.status(500).json({ error: 'Error interno al eliminar variedad' });
+  }
+});
+
+// ==========================================
+// GESTIÓN DE PARÁMETROS DE CALIFICACIÓN
+// ==========================================
+app.get('/api/parametros', async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT valor FROM configuraciones WHERE clave = 'parametros_calificacion'"
+    );
+    
+    if (result.rows.length > 0) {
+      res.json(result.rows[0].valor);
+    } else {
+      res.json({ calidad: [], condicion: [] });
+    }
+  } catch (err) {
+    console.error('Error obteniendo parámetros:', err);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+app.post('/api/parametros', async (req, res) => {
+  try {
+    const { calidad, condicion } = req.body;
+    const nuevoValor = { calidad, condicion };
+
+    const query = `
+      INSERT INTO configuraciones (clave, valor) 
+      VALUES ('parametros_calificacion', $1::jsonb) 
+      ON CONFLICT (clave) 
+      DO UPDATE SET valor = EXCLUDED.valor;
+    `;
+    
+    await pool.query(query, [JSON.stringify(nuevoValor)]);
+    res.json({ success: true, message: 'Parámetros guardados correctamente' });
+  } catch (err) {
+    console.error('Error guardando parámetros:', err);
+    res.status(500).json({ error: 'Error interno guardando configuración' });
   }
 });
 

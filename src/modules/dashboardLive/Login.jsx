@@ -6,27 +6,56 @@ export default function Login({ onLogin }) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
+  const [cargando, setCargando] = useState(false);
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
 
-    // Lógica de validación de roles (pasamos a minúsculas por si acaso)
-    const userToValidate = username.toLowerCase().trim();
+    if (!username.trim() || !password.trim()) {
+      setError('Por favor, ingresa tu usuario y contraseña.');
+      return;
+    }
 
-    if (userToValidate === 'admin' && password === 'admin') {
-      onLogin({ username: 'admin', role: 'admin' });
-    } else if (userToValidate === 'calidad' && password === 'calidad') {
-      onLogin({ username: 'calidad', role: 'calidad' });
-    } else {
-      setError('Usuario o contraseña incorrectos.');
+    setCargando(true);
+
+    try {
+      // Detección automática de la API (Producción vs Desarrollo)
+      const API_URL = import.meta.env.PROD 
+        ? 'https://evap.maq.goldanda.cl' 
+        : `http://${window.location.hostname || 'localhost'}:3001`;
+
+      const response = await fetch(`${API_URL}/api/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ 
+          username: username.trim(), 
+          password: password.trim() 
+        })
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        // Pasa todo el objeto del usuario devuelto por PostgreSQL (id, username, role, permisos)
+        onLogin(data.user);
+      } else {
+        setError(data.message || 'Usuario o contraseña incorrectos.');
+      }
+    } catch (err) {
+      console.error("Error al iniciar sesión:", err);
+      setError('No se pudo conectar con el servidor backend.');
+    } finally {
+      setCargando(false);
     }
   };
 
   return (
     <div className="relative min-h-screen w-full flex items-center justify-center bg-[#F3F6F9] overflow-hidden font-sans">
       
-      {/* FONDO DECORATIVO (Estilo Suave y Elegante basado en referencia) */}
+      {/* FONDO DECORATIVO */}
       <div className="absolute inset-0 z-0 pointer-events-none bg-[#F4F7FA] overflow-hidden">
         
         {/* Patrón de puntos superior izquierdo */}
@@ -52,22 +81,17 @@ export default function Login({ onLogin }) {
         {/* Grupo de Ondas Suaves Superpuestas */}
         <div className="absolute inset-0 opacity-80">
           
-          {/* Onda Principal Arriba/Izquierda */}
           <svg className="absolute top-0 left-0 w-full h-[65%] object-cover object-left-top" viewBox="0 0 1440 500" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
             <path fill="#FFFFFF" d="M0,0 L0,350 C300,450 450,250 850,300 C1150,337 1300,200 1440,150 L1440,0 Z"></path>
-            {/* Sombra/Borde suave de la onda */}
             <path fill="none" stroke="#E2E8F0" strokeWidth="2" d="M0,350 C300,450 450,250 850,300 C1150,337 1300,200 1440,150"></path>
           </svg>
 
-          {/* Onda Secundaria Abajo/Centro/Derecha */}
           <svg className="absolute bottom-0 right-0 w-full h-[75%] object-cover object-right-bottom" viewBox="0 0 1440 600" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
             <path fill="#F1F5F9" opacity="0.6" d="M1440,600 L1440,200 C1050,100 900,450 450,400 C200,370 80,480 0,550 L0,600 Z"></path>
             <path fill="#FFFFFF" opacity="0.9" d="M1440,600 L1440,300 C1100,250 950,550 500,500 C250,475 100,580 0,600 Z"></path>
-            {/* Sombra/Borde suave de la onda inferior */}
             <path fill="none" stroke="#E2E8F0" strokeWidth="3" opacity="0.7" d="M1440,300 C1100,250 950,550 500,500 C250,475 100,580 0,600"></path>
           </svg>
 
-          {/* Resplandor blanco central detrás de la tarjeta para darle mayor contraste */}
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-white rounded-full blur-[100px] opacity-70"></div>
           
         </div>
@@ -99,9 +123,9 @@ export default function Login({ onLogin }) {
             </div>
             <input
               type="text"
-              placeholder="usuario" // <--- Cambio solicitado
-              autoCapitalize="none" // <--- Evita la mayúscula en móvil
-              autoCorrect="off"     // <--- Evita el autocorrector en móvil
+              placeholder="usuario"
+              autoCapitalize="none"
+              autoCorrect="off"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               className="w-full pl-11 pr-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-[14px] text-slate-700 placeholder-slate-400 focus:outline-none focus:border-[#E96008] focus:ring-1 focus:ring-[#E96008] transition-colors"
@@ -145,12 +169,11 @@ export default function Login({ onLogin }) {
           {/* Error de validación */}
           {error && <p className="text-red-500 text-[13px] text-center font-medium animate-pulse">{error}</p>}
 
-          {/* Opciones extra: Recordar sesión y Olvidaste contraseña */}
+          {/* Opciones extra */}
           <div className="flex items-center justify-between pt-1 pb-3">
             <label className="flex items-center gap-2 cursor-pointer group">
               <div className="w-[16px] h-[16px] border border-slate-300 rounded flex items-center justify-center group-hover:border-[#E96008] transition-colors">
                 <input type="checkbox" className="hidden" />
-                {/* Checkbox custom visual */}
               </div>
               <span className="text-[12px] text-slate-500">Recordar sesión</span>
             </label>
@@ -162,9 +185,10 @@ export default function Login({ onLogin }) {
           {/* Botón Ingresar */}
           <button
             type="submit"
-            className="w-full bg-[#E96008] hover:bg-[#D45607] text-white text-[15px] font-bold py-3.5 rounded-full shadow-lg shadow-orange-500/20 active:scale-[0.98] transition-all"
+            disabled={cargando}
+            className="w-full bg-[#E96008] hover:bg-[#D45607] disabled:opacity-60 text-white text-[15px] font-bold py-3.5 rounded-full shadow-lg shadow-orange-500/20 active:scale-[0.98] transition-all flex items-center justify-center"
           >
-            Ingresar
+            {cargando ? 'Iniciando sesión...' : 'Ingresar'}
           </button>
         </form>
 
@@ -175,7 +199,7 @@ export default function Login({ onLogin }) {
           <div className="h-px bg-slate-100 flex-1"></div>
         </div>
 
-        {/* Pie de tarjeta: Acceso Seguro */}
+        {/* Pie de tarjeta */}
         <div className="mt-6 flex items-center justify-center gap-2 text-slate-400">
           <ShieldCheck className="h-4 w-4" strokeWidth={1.5} />
           <span className="text-[12px] font-medium">Acceso seguro</span>

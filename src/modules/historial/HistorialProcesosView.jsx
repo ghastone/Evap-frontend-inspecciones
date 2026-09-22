@@ -17,7 +17,7 @@ const defectosCondicionBase = {
   'Sobre madurez': 0, 'Quemado de sol': 0, 'Desgarro pedicelar': 0, 'Medias lunas': 0, 'Pitting leve': 0, 'Piel de lagarto': 0
 };
 
-export default function HistorialProcesosView({ onVerResumen }) {
+export default function HistorialProcesosView({ onVerResumen, userRole }) {
   const [procesos, setProcesos] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [procesoSeleccionado, setProcesoSeleccionado] = useState(null);
@@ -55,9 +55,7 @@ export default function HistorialProcesosView({ onVerResumen }) {
   const [datosVistaPrevia, setDatosVistaPrevia] = useState(null);
   const [cargandoVistaPreviaId, setCargandoVistaPreviaId] = useState(null);
   const reporteRef = useRef();
-  // ==============================================================================
 
-  // 👇 NUEVO: Variable inteligente que detecta si está en Producción o Desarrollo
   const API_URL = import.meta.env.PROD 
     ? 'https://evap.maq.goldanda.cl' 
     : `http://${window.location.hostname || 'localhost'}:3001`;
@@ -179,15 +177,11 @@ export default function HistorialProcesosView({ onVerResumen }) {
   };
 
   // ================= FUNCIONES PARA INFORME PDF Y VISTA PREVIA =================
-  
-  // 1. ABRIR VISTA PREVIA (Usando los datos que ya están en la tabla)
   const abrirVistaPrevia = (procesoId) => {
-    // Busca el proceso directamente de la lista ya cargada
     const procesoEncontrado = procesos.find(p => p.id === procesoId || p._id === procesoId);
     setDatosVistaPrevia(procesoEncontrado);
   };
 
-  // 2. DESCARGAR PDF ROBUSTO (Usando los datos locales)
   const descargarPDF = async (procesoId) => {
     setGenerandoReporteId(procesoId);
     try {
@@ -613,15 +607,18 @@ export default function HistorialProcesosView({ onVerResumen }) {
                                 className="absolute right-6 top-10 w-52 bg-white border border-slate-200 shadow-xl rounded-2xl overflow-hidden z-30 flex flex-col animate-fade-in text-left divide-y divide-slate-100"
                                 onClick={(e) => e.stopPropagation()}
                               >
-                                <button 
-                                  onClick={() => abrirEdicionProceso(proc)} 
-                                  className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-slate-50 text-xs font-bold text-slate-700 transition-colors"
-                                >
-                                  <Edit3 className="w-4 h-4 text-blue-600" />
-                                  <span>Editar proceso</span>
-                                </button>
+                                {/* BOTÓN EDITAR: Admin y QC pueden (Gerencia NO) */}
+                                {userRole !== 'gerencia' && (
+                                  <button 
+                                    onClick={() => abrirEdicionProceso(proc)} 
+                                    className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-slate-50 text-xs font-bold text-slate-700 transition-colors"
+                                  >
+                                    <Edit3 className="w-4 h-4 text-blue-600" />
+                                    <span>Editar proceso</span>
+                                  </button>
+                                )}
 
-                                {/* BOTÓN VISTA PREVIA */}
+                                {/* BOTÓN VISTA PREVIA: Todos los roles pueden */}
                                 <button 
                                   onClick={() => {
                                     setMenuProcesoAbiertoId(null);
@@ -634,7 +631,7 @@ export default function HistorialProcesosView({ onVerResumen }) {
                                   <span>{cargandoVistaPreviaId === proc.id ? 'Cargando...' : 'Ver resumen de proceso'}</span>
                                 </button>
 
-                                {/* BOTÓN DESCARGAR PDF */}
+                                {/* BOTÓN DESCARGAR PDF: Todos los roles pueden */}
                                 <button 
                                   onClick={() => descargarPDF(proc.id)} 
                                   disabled={generandoReporteId === proc.id}
@@ -643,14 +640,17 @@ export default function HistorialProcesosView({ onVerResumen }) {
                                   <Download className="w-4 h-4 text-green-600" />
                                   <span>{generandoReporteId === proc.id ? 'Generando...' : 'Descargar Informe PDF'}</span>
                                 </button>
-                                
-                                <button 
-                                  onClick={() => solicitarEliminarProceso(proc)} 
-                                  className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-red-50 text-xs font-bold text-red-600 transition-colors"
-                                >
-                                  <Trash2 className="w-4 h-4 text-red-600" />
-                                  <span>Eliminar proceso</span>
-                                </button>
+
+                                {/* BOTÓN ELIMINAR: SOLO Administrador puede (QC y Gerencia NO) */}
+                                {userRole === 'admin' && (
+                                  <button 
+                                    onClick={() => solicitarEliminarProceso(proc)} 
+                                    className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-red-50 text-xs font-bold text-red-600 transition-colors"
+                                  >
+                                    <Trash2 className="w-4 h-4 text-red-600" />
+                                    <span>Eliminar proceso</span>
+                                  </button>
+                                )}
                               </div>
                             )}
                           </td>
@@ -717,12 +717,11 @@ export default function HistorialProcesosView({ onVerResumen }) {
           </div>
         )}
 
-{/* ================= MODAL DE VISTA PREVIA DEL INFORME ================= */}
+        {/* MODAL DE VISTA PREVIA DEL INFORME */}
         {datosVistaPrevia && (
           <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 animate-fade-in">
             <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden relative">
               
-              {/* Encabezado del Modal */}
               <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-white z-10">
                 <div>
                   <h3 className="font-black text-slate-900 text-lg">Vista Previa del Informe</h3>
@@ -746,7 +745,6 @@ export default function HistorialProcesosView({ onVerResumen }) {
                 </div>
               </div>
 
-              {/* Contenedor escroleable donde se muestra la Plantilla */}
               <div className="flex-1 overflow-auto bg-slate-200 p-6 flex justify-center custom-scrollbar">
                 <div className="shadow-2xl">
                   <PlantillaInforme datos={datosVistaPrevia} />
@@ -756,15 +754,13 @@ export default function HistorialProcesosView({ onVerResumen }) {
             </div>
           </div>
         )}
-        {/* ==================================================================== */}
 
-        {/* ================= COMPONENTE OCULTO PARA EL PDF ================= */}
+        {/* COMPONENTE OCULTO PARA EL PDF */}
         <div style={{ position: 'fixed', top: 0, left: 0, zIndex: -1000, opacity: 0.01, pointerEvents: 'none' }}>
           {datosReporte && (
             <PlantillaInforme ref={reporteRef} datos={datosReporte} />
           )}
         </div>
-        {/* ================================================================== */}
 
       </div>
     );
@@ -901,7 +897,7 @@ export default function HistorialProcesosView({ onVerResumen }) {
           </div>
         </div>
 
-        {/* SECCIÓN 2: TABLA DE CAJAS ANALIZADAS CON ACCIONES */}
+        {/* SECCIÓN 2: TABLA DE CAJAS ANALIZADAS */}
         <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
             <h2 className="text-sm font-extrabold text-slate-800 uppercase tracking-wider">
@@ -1001,7 +997,6 @@ export default function HistorialProcesosView({ onVerResumen }) {
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto p-6 md:p-8 flex flex-col gap-5 border border-slate-100 relative">
             
-            {/* CABECERA DEL MODAL */}
             <div className="flex justify-between items-center border-b border-slate-100 pb-4">
               <div>
                 <h3 className="font-black text-slate-900 text-lg md:text-xl">
@@ -1017,7 +1012,6 @@ export default function HistorialProcesosView({ onVerResumen }) {
               </button>
             </div>
 
-            {/* PARAMETROS TÉCNICOS DE LA CAJA */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200/80">
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1">Muestra (frutos)</label>
@@ -1066,7 +1060,6 @@ export default function HistorialProcesosView({ onVerResumen }) {
               </div>
             </div>
 
-            {/* PESTAÑAS DE DEFECTOS */}
             <div className="flex border-b border-slate-200">
               <button
                 type="button"
@@ -1092,7 +1085,6 @@ export default function HistorialProcesosView({ onVerResumen }) {
               </button>
             </div>
 
-            {/* GRILLA DE DEFECTOS */}
             {tabDefectosModal === 'calidad' && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
                 {Object.keys(defectosCalidadBase).map(def => {
@@ -1131,7 +1123,6 @@ export default function HistorialProcesosView({ onVerResumen }) {
               </div>
             )}
 
-            {/* PIE DEL MODAL DE CAJA */}
             <div className="flex justify-end pt-3 border-t border-slate-100">
               <button
                 onClick={() => setCajaIndexEditandoModal(null)}

@@ -26,11 +26,10 @@ export default function InspeccionModule({
   const [showModalFinalizar, setShowModalFinalizar] = useState(false);
   const [showModalCancelar, setShowModalCancelar] = useState(false);
   const [mensajeExito, setMensajeExito] = useState('');
-
   const [haVistoCondicion, setHaVistoCondicion] = useState(false);
 
+  // ESTADOS PRINCIPALES DE LOS DATOS
   const [cajas, setCajas] = useState([]);
-  
   const [cajaActual, setCajaActual] = useState({
     numCaja: 1, frutos: '100', calibre: '', brix: '', color: '',
     defCalidad: { ...defectosCalidadBase }, defCondicion: { ...defectosCondicionBase }
@@ -43,11 +42,46 @@ export default function InspeccionModule({
   const hideSpinners = "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
   const headerCompleto = cajaActual.frutos !== '' && cajaActual.calibre !== '' && cajaActual.color !== '' && cajaActual.brix !== '';
 
-  // 👇 NUEVO: Variable inteligente que detecta si está en Producción o Desarrollo
   const API_URL = import.meta.env.PROD 
     ? 'https://evap.maq.goldanda.cl' 
     : `http://${window.location.hostname || 'localhost'}:3001`;
 
+  // ==========================================
+  // LÓGICA DE AUTOGUARDADO (LOCALSTORAGE)
+  // ==========================================
+  const DRAFT_KEY = `draft_inspeccion_${numProceso}`;
+
+  // 1. Cargar borrador al montar el componente (Si existe)
+  useEffect(() => {
+    if (!numProceso) return;
+    try {
+      const savedDraft = localStorage.getItem(DRAFT_KEY);
+      if (savedDraft) {
+        const parsed = JSON.parse(savedDraft);
+        setCajas(parsed.cajas || []);
+        if (parsed.cajaActual) setCajaActual(parsed.cajaActual);
+        setMensajeExito('Borrador restaurado correctamente');
+        setTimeout(() => setMensajeExito(''), 3000);
+      }
+    } catch (e) {
+      console.warn("Error leyendo borrador local", e);
+    }
+  }, [numProceso, DRAFT_KEY]);
+
+  // 2. Guardar borrador automáticamente ante CUALQUIER cambio en cajas o cajaActual
+  useEffect(() => {
+    if (!numProceso) return;
+    const draft = { cajas, cajaActual };
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  }, [cajas, cajaActual, numProceso, DRAFT_KEY]);
+
+  // Función para limpiar el borrador una vez finalizado o cancelado el proceso
+  const limpiarBorrador = () => {
+    localStorage.removeItem(DRAFT_KEY);
+  };
+  // ==========================================
+
+  // Envío de datos al Dashboard en vivo (Broadcast)
   useEffect(() => {
     const payload = {
       numProceso, exportadora: exportadoraSel, productor: productorNombre, variedad: variedadSel, csg: csgSel,
@@ -176,6 +210,7 @@ export default function InspeccionModule({
     } catch (err) {
       console.log('Error limpiando live process:', err);
     }
+    limpiarBorrador(); // Borramos el autoguardado porque el usuario decidió cancelar todo
     setShowModalCancelar(false);
     if (onVolver) onVolver();
   };
@@ -230,6 +265,7 @@ export default function InspeccionModule({
           headers: { 'Content-Type': 'application/json' }, 
           body: JSON.stringify({}) 
         });
+        limpiarBorrador(); // Eliminamos el autoguardado porque ya se envió exitosamente al servidor
         alert("¡Proceso guardado exitosamente!");
         if (onFinishedInspection) onFinishedInspection(parseInt(numProceso, 10));
       } else { alert("❌ ERROR DEL SERVIDOR: " + (data.error || "Error al guardar")); }

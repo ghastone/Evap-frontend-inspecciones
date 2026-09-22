@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { ArrowLeft, Activity, Maximize } from 'lucide-react';
 
@@ -49,7 +49,7 @@ function BarraTolerancia({ nombre, pct, lim1, lim2 }) {
   return (
     <div className="grid grid-cols-12 gap-2 py-0.5 xl:py-1">
       <div className="col-span-5 h-[16px] xl:h-[22px] flex items-center pr-2" title={nombre}>
-        <span className="text-[14px] xl:text-[18px] font-medium text-slate-700 truncate leading-tight w-full">
+        <span className="text-[13px] xl:text-[17px] truncate leading-tight w-full font-medium text-slate-600">
           {nombre}
         </span>
       </div>
@@ -93,18 +93,27 @@ function BarraTolerancia({ nombre, pct, lim1, lim2 }) {
   );
 }
 
-// Añadimos onAbrirMenu como posible prop enviada desde tu Layout principal
 export default function DashboardLiveView({ onClose, onAbrirMenu }) {
   const [datos, setDatos] = useState(emptyData);
   const [hayConexion, setHayConexion] = useState(false);
-  
-  // Estado para controlar la pantalla completa y el menú lateral
   const [isFullScreen, setIsFullScreen] = useState(true);
 
-  // 👇 NUEVO: Variable inteligente que detecta si está en Producción o Desarrollo
+  const limitesCalidadRef = useRef([]);
+  const limitesCondicionRef = useRef([]);
+
   const API_URL = import.meta.env.PROD 
     ? 'https://evap.maq.goldanda.cl' 
     : `http://${window.location.hostname || 'localhost'}:3001`;
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/parametros`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.calidad) limitesCalidadRef.current = data.calidad;
+        if (data.condicion) limitesCondicionRef.current = data.condicion;
+      })
+      .catch(err => console.error("Error cargando límites de tolerancia:", err));
+  }, [API_URL]);
 
   const procesarDatosVivos = (rawData) => {
     if (!rawData || !rawData.numProceso) return emptyData;
@@ -118,7 +127,7 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
       return { ...emptyData, numProceso: rawData.numProceso, huerto: rawData.productor, variedad: rawData.variedad };
     }
     
-    let totalFrutos = 0, totalCal = 0, totalCond = 0;
+    let totalFrutos = 0, totalCal = 0, totalCond = 0, sumatoriaCalSinCalibres = 0;
     let lightBrix = [], darkBrix = [];
     let agregadoCal = {}, agregadoCond = {};
     
@@ -135,6 +144,11 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
         const v = parseInt(val) || 0;
         totalCal += v;
         if (v > 0) agregadoCal[def] = (agregadoCal[def] || 0) + v;
+        
+        // Excluimos Bajo Calibre y Sobre Calibre de la sumatoria
+        if (def !== 'Bajo calibre' && def !== 'Sobre calibre') {
+          sumatoriaCalSinCalibres += v;
+        }
       });
       
       Object.entries(c.defCondicion || {}).forEach(([def, val]) => {
@@ -148,24 +162,88 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
     const pCond = totalFrutos ? (totalCond / totalFrutos) * 100 : 0;
     const pExp = totalFrutos ? Math.max(0, 100 - pCal - pCond) : 100;
     
-    let califLetter = pCal <= 5 ? 'A' : pCal <= 10 ? 'B' : 'C';
-    let califNum = pCond <= 5 ? '1' : pCond <= 10 ? '2' : '3';
-    const calificacion = `${califLetter}${califNum}`;
-    
-    const estado = (califLetter === 'C' || califNum === '3') ? 'Objetado' : 'Aprobado';
-    
     const calcSolidos = (arr) => {
       if (arr.length === 0) return { min: 0, max: 0, prom: 0, count: 0 };
       return { min: Math.min(...arr), max: Math.max(...arr), prom: arr.reduce((a,b)=>a+b,0)/arr.length, count: arr.length };
     };
-    
-    const topCalidad = Object.entries(agregadoCal).sort((a,b)=>b[1]-a[1]).map(([nombre, count]) => ({
-      nombre, pct: (count / totalFrutos) * 100, lim1: 5, lim2: 10 
-    }));
+
+    const getLimitesCalidad = (nombre) => {
+      const param = limitesCalidadRef.current.find(p => p.nombre === nombre);
+      if (param) return { lim1: parseFloat(param.limAB) || 0, lim2: parseFloat(param.limBC) || 0 };
       
-    const topCondicion = Object.entries(agregadoCond).sort((a,b)=>b[1]-a[1]).map(([nombre, count]) => ({
-      nombre, pct: (count / totalFrutos) * 100, lim1: 5, lim2: 10
-    }));
+      if (nombre === 'Sumatoria de calidad') return { lim1: 15, lim2: 20 };
+      if (nombre === 'Falta de color') return { lim1: 10, lim2: 20 };
+      if (nombre === 'Fruta sin pedicelo') return { lim1: 8, lim2: 16 };
+      if (nombre === 'Russet') return { lim1: 6, lim2: 15 };
+      if (nombre === 'Frutos deformes / dobles') return { lim1: 3, lim2: 6 };
+      return { lim1: 5, lim2: 10 }; 
+    };
+
+    const getLimitesCondicion = (nombre) => {
+      const param = limitesCondicionRef.current.find(p => p.nombre === nombre);
+      if (param) return { lim1: parseFloat(param.lim12) || 0, lim2: parseFloat(param.lim23) || 0 };
+      
+      // Fallbacks exactos de la nueva tabla
+      if (nombre === 'Sumatoria de condición') return { lim1: 10, lim2: 15 };
+      if (['Pudrición', 'Mancha parda', 'Herida de insecto', 'Herida de pájaro'].includes(nombre)) return { lim1: 0, lim2: 0.4 };
+      if (['Herida abierta'].includes(nombre)) return { lim1: 1, lim2: 3 };
+      if (['Partidura por agua', 'Virosis'].includes(nombre)) return { lim1: 2, lim2: 4 };
+      if (['Partiduras laterales', 'Partiduras apicales', 'Machucón', 'Pitting severo', 'Fruta blanda', 'Sobre madurez', 'Quemado de sol'].includes(nombre)) return { lim1: 2, lim2: 5 };
+      if (nombre === 'Desgarro pedicelar') return { lim1: 3, lim2: 6 };
+      if (['Medias lunas', 'Pitting leve', 'Piel de lagarto'].includes(nombre)) return { lim1: 5, lim2: 8 };
+
+      return { lim1: 1, lim2: 2 };
+    };
+    
+    // ============================================
+    // EVALUADOR MULTIVARIABLE (INCLUYE SUMATORIAS)
+    // ============================================
+    let peorNotaCalidad = 1; 
+    let peorNotaCondicion = 1; 
+
+    // Calidad individual
+    Object.entries(agregadoCal).forEach(([def, count]) => {
+      const pct = (count / totalFrutos) * 100;
+      const lims = getLimitesCalidad(def);
+      if (pct > lims.lim2) peorNotaCalidad = Math.max(peorNotaCalidad, 3);
+      else if (pct > lims.lim1) peorNotaCalidad = Math.max(peorNotaCalidad, 2);
+    });
+
+    // Sumatoria de Calidad global
+    const pctSumCal = totalFrutos ? (sumatoriaCalSinCalibres / totalFrutos) * 100 : 0;
+    const limSumCal = getLimitesCalidad('Sumatoria de calidad');
+    if (pctSumCal > limSumCal.lim2) peorNotaCalidad = Math.max(peorNotaCalidad, 3);
+    else if (pctSumCal > limSumCal.lim1) peorNotaCalidad = Math.max(peorNotaCalidad, 2);
+
+    // Condición individual
+    Object.entries(agregadoCond).forEach(([def, count]) => {
+      const pct = (count / totalFrutos) * 100;
+      const lims = getLimitesCondicion(def);
+      if (pct > lims.lim2) peorNotaCondicion = Math.max(peorNotaCondicion, 3);
+      else if (pct > lims.lim1) peorNotaCondicion = Math.max(peorNotaCondicion, 2);
+    });
+
+    // Sumatoria de Condición global
+    const pctSumCond = totalFrutos ? (totalCond / totalFrutos) * 100 : 0;
+    const limSumCond = getLimitesCondicion('Sumatoria de condición');
+    if (pctSumCond > limSumCond.lim2) peorNotaCondicion = Math.max(peorNotaCondicion, 3);
+    else if (pctSumCond > limSumCond.lim1) peorNotaCondicion = Math.max(peorNotaCondicion, 2);
+
+    let califLetter = peorNotaCalidad === 3 ? 'C' : peorNotaCalidad === 2 ? 'B' : 'A';
+    let califNum = peorNotaCondicion.toString();
+    const calificacion = `${califLetter}${califNum}`;
+    const estado = (califLetter === 'C' || califNum === '3') ? 'Objetado' : 'Aprobado';
+
+    // Generar Arrays limpios (Sin las sumatorias visuales)
+    const topCalidad = Object.entries(agregadoCal).sort((a,b)=>b[1]-a[1]).map(([nombre, count]) => {
+      const limites = getLimitesCalidad(nombre);
+      return { nombre, pct: (count / totalFrutos) * 100, lim1: limites.lim1, lim2: limites.lim2 };
+    });
+      
+    const topCondicion = Object.entries(agregadoCond).sort((a,b)=>b[1]-a[1]).map(([nombre, count]) => {
+      const limites = getLimitesCondicion(nombre);
+      return { nombre, pct: (count / totalFrutos) * 100, lim1: limites.lim1, lim2: limites.lim2 };
+    });
       
     return {
       numProceso: rawData.numProceso, huerto: rawData.productor, variedad: rawData.variedad,
@@ -178,7 +256,8 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
   };
 
   useEffect(() => {
-    // 1. Intentar forzar pantalla completa al montar
+    let isMounted = true; 
+
     const enterFullscreen = async () => {
       try {
         if (!document.fullscreenElement) {
@@ -190,17 +269,19 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
     };
     enterFullscreen();
 
-    // 2. Sincronizar el estado si el usuario presiona "ESC" en el teclado
     const handleFullscreenChange = () => {
       setIsFullScreen(!!document.fullscreenElement);
     };
     document.addEventListener('fullscreenchange', handleFullscreenChange);
 
-    // 3. Intervalo de consulta al servidor
     const interval = setInterval(() => {
+      if (!isMounted) return; 
+      
       fetch(`${API_URL}/api/live`)
         .then(res => res.json())
         .then(rawData => {
+          if (!isMounted) return; 
+          
           if (rawData && rawData.numProceso) {
             setDatos(procesarDatosVivos(rawData));
             setHayConexion(true);
@@ -209,33 +290,30 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
           }
         })
         .catch(err => {
+          if (!isMounted) return;
           console.log('Buscando conexión con servidor...');
           setHayConexion(false);
         });
     }, 1500); 
 
-    // Al desmontar, salir de pantalla completa
     return () => {
+      isMounted = false; 
       clearInterval(interval);
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
       if (document.fullscreenElement) {
         document.exitFullscreen().catch(() => {});
       }
     };
-  }, []);
+  }, []); 
 
-  // Lógica del botón de la flecha izquierda
   const handleMenuAction = async () => {
     if (isFullScreen) {
-      // Si está en pantalla completa, salimos y mostramos el menú
       if (document.fullscreenElement) {
         await document.exitFullscreen().catch(()=>{});
       }
       setIsFullScreen(false);
-      // Disparamos la apertura del menú si existe la función (útil para móviles)
       if (onAbrirMenu) onAbrirMenu();
     } else {
-      // Si no está en pantalla completa, forzamos el modo inmersivo
       try {
         if (!document.fullscreenElement) {
           await document.documentElement.requestFullscreen();
@@ -248,7 +326,6 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
   if (!hayConexion) {
     return (
       <div className={`${isFullScreen ? "fixed inset-0 z-[100] h-screen" : "h-full relative"} w-full bg-slate-50 flex flex-col items-center justify-center animate-fade-in`}>
-        {/* BOTÓN PARA REVELAR MENÚ LATERAL EN ESTADO DE CARGA */}
         <div className="absolute top-6 left-6 flex items-center gap-3">
           <button 
             onClick={handleMenuAction} 
@@ -261,7 +338,6 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
 
         <Activity className="w-16 h-16 text-[#E96008] mb-6 animate-pulse" />
         
-        {/* TEXTOS ACTUALIZADOS */}
         <h1 className="text-2xl md:text-4xl font-bold mb-3 text-slate-800 text-center px-4">
           Esperando conexión en vivo...
         </h1>
@@ -292,7 +368,6 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
   const bannerEndColor = isObjetado ? "#DC2626" : "#139E59";   
 
   return (
-    // CONTENEDOR DINÁMICO: Si isFullScreen es true, cubre la pantalla (fixed inset-0). Si no, permite ver el menú lateral al natural.
     <div className={`${isFullScreen ? "fixed inset-0 z-[100] h-screen" : "h-full relative"} w-full bg-slate-50 overflow-hidden animate-fade-in`}>
       <div className={`w-full h-full flex flex-col py-4 px-2 sm:px-4 lg:px-6 xl:px-8 2xl:px-10 min-h-0 ${isObjetado ? 'gap-[8px] xl:gap-[11px]' : 'gap-[11px] xl:gap-[14px]'}`} style={{ fontFamily: '"Segoe UI", sans-serif' }}>
         
@@ -319,8 +394,6 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
           </svg>
 
           <div className="relative z-10 flex items-center pl-3 sm:pl-5 text-white h-full">
-            
-            {/* NUEVO BOTÓN TIPO FLECHA (Izquierda del Banner) */}
             <button 
               onClick={handleMenuAction}
               title={isFullScreen ? "Abrir menú lateral" : "Pantalla completa"}
@@ -361,7 +434,6 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
                 ))}
               </div>
             </div>
-            
           </div>
         </div>
 
