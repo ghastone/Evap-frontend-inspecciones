@@ -5,7 +5,10 @@ export default function GestionExportadoras({ exportadoras, setExportadoras }) {
   const [nombreNueva, setNombreNueva] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const API_URL = `http://${window.location.hostname || 'localhost'}:3001`;
+  // === URL INTELIGENTE CENTRALIZADA ===
+  const API_URL = window.location.hostname.includes('goldanda.cl') 
+    ? 'https://evap.maq.goldanda.cl' 
+    : `http://${window.location.hostname || 'localhost'}:3001`;
 
   const agregarExportadora = async (e) => {
     e.preventDefault();
@@ -43,10 +46,7 @@ export default function GestionExportadoras({ exportadoras, setExportadoras }) {
   const eliminarExportadora = async (nombre) => {
     if (window.confirm(`¿Estás seguro de eliminar la exportadora "${nombre}"?`)) {
       try {
-        const API_URL = import.meta.env.PROD 
-          ? 'https://evap.maq.goldanda.cl' 
-          : `http://${window.location.hostname || 'localhost'}:3001`;
-
+        // Ya no es necesario definir API_URL aquí porque usa la centralizada de arriba
         const res = await fetch(`${API_URL}/api/exportadoras/${encodeURIComponent(nombre)}`, {
           method: 'DELETE'
         });

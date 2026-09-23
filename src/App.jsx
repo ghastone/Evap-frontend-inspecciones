@@ -55,7 +55,7 @@ export default function App() {
     localStorage.clear();
     sessionStorage.clear();
     
-    const API_URL = import.meta.env.PROD 
+    const API_URL = window.location.hostname.includes('goldanda.cl')     
       ? 'https://evap.maq.goldanda.cl' 
       : `http://${window.location.hostname || 'localhost'}:3001`;
       
@@ -143,7 +143,7 @@ export default function App() {
     localStorage.removeItem('inspeccionActiva');
     sessionStorage.clear();
 
-    const API_URL = import.meta.env.PROD 
+    const API_URL = window.location.hostname.includes('goldanda.cl') 
       ? 'https://evap.maq.goldanda.cl' 
       : `http://${window.location.hostname || 'localhost'}:3001`;
 
@@ -168,7 +168,7 @@ export default function App() {
 
   const cargarDatosMaestros = async () => {
     try {
-      const API_URL = import.meta.env.PROD 
+      const API_URL = window.location.hostname.includes('goldanda.cl') 
         ? 'https://evap.maq.goldanda.cl' 
         : `http://${window.location.hostname || 'localhost'}:3001`;
       
@@ -218,9 +218,9 @@ export default function App() {
     localStorage.clear(); 
     sessionStorage.clear();
 
-    const API_URL = import.meta.env.PROD 
-      ? 'https://evap.maq.goldanda.cl' 
-      : `http://${window.location.hostname || 'localhost'}:3001`;
+    const API_URL = window.location.hostname.includes('goldanda.cl') 
+     ? 'https://evap.maq.goldanda.cl' 
+     : `http://${window.location.hostname || 'localhost'}:3001`;
       
     fetch(`${API_URL}/api/live`, {
       method: 'POST',

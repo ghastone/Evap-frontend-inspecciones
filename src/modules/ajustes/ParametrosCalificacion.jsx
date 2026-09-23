@@ -52,7 +52,7 @@ export default function ParametrosCalificacion() {
   const [nuevoCondicion, setNuevoCondicion] = useState({ nombre: '', lim12: '', lim23: '' });
 
   // URL Inteligente
-  const API_URL = import.meta.env.PROD 
+  const API_URL = window.location.hostname.includes('goldanda.cl')
     ? 'https://evap.maq.goldanda.cl' 
     : `http://${window.location.hostname || 'localhost'}:3001`;
 

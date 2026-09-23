@@ -56,7 +56,7 @@ export default function HistorialProcesosView({ onVerResumen, userRole }) {
   const [cargandoVistaPreviaId, setCargandoVistaPreviaId] = useState(null);
   const reporteRef = useRef();
 
-  const API_URL = import.meta.env.PROD 
+  const API_URL = window.location.hostname.includes('goldanda.cl')
     ? 'https://evap.maq.goldanda.cl' 
     : `http://${window.location.hostname || 'localhost'}:3001`;
 

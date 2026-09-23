@@ -21,7 +21,7 @@ export default function Login({ onLogin }) {
 
     try {
       // Detección automática de la API (Producción vs Desarrollo)
-      const API_URL = import.meta.env.PROD 
+      const API_URL = window.location.hostname.includes('goldanda.cl')
         ? 'https://evap.maq.goldanda.cl' 
         : `http://${window.location.hostname || 'localhost'}:3001`;
 

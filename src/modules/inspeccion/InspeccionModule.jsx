@@ -42,7 +42,7 @@ export default function InspeccionModule({
   const hideSpinners = "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
   const headerCompleto = cajaActual.frutos !== '' && cajaActual.calibre !== '' && cajaActual.color !== '' && cajaActual.brix !== '';
 
-  const API_URL = import.meta.env.PROD 
+  const API_URL = window.location.hostname.includes('goldanda.cl')
     ? 'https://evap.maq.goldanda.cl' 
     : `http://${window.location.hostname || 'localhost'}:3001`;
 

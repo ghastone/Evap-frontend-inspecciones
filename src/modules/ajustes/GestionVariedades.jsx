@@ -6,7 +6,7 @@ export default function GestionVariedades({ variedades, setVariedades }) {
   const [isLoading, setIsLoading] = useState(false);
 
   // 👇 NUEVO: Variable inteligente que detecta si está en Producción o Desarrollo
-  const API_URL = import.meta.env.PROD 
+  const API_URL = window.location.hostname.includes('goldanda.cl')
     ? 'https://evap.maq.goldanda.cl' 
     : `http://${window.location.hostname || 'localhost'}:3001`;
 

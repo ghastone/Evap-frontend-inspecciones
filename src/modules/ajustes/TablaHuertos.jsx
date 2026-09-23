@@ -11,7 +11,7 @@ export default function TablaHuertos({ exportadoras = [] }) {
   const [formHuerto, setFormHuerto] = useState({ productor: '', huerto: '', csg: '', exportadora: '' });
 
   // 👇 NUEVO: Variable inteligente que detecta si está en Producción o Desarrollo
-  const API_URL = import.meta.env.PROD 
+  const API_URL = window.location.hostname.includes('goldanda.cl')
     ? 'https://evap.maq.goldanda.cl' 
     : `http://${window.location.hostname || 'localhost'}:3001`;
 
