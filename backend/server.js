@@ -52,6 +52,17 @@ pool.connect()
         console.log('👤 Usuario "admin" inicial creado con éxito (Clave: admin123).');
       }
 
+      // 🔥 AUTO-MIGRACIÓN: Agregar columnas hora_inicio y hora_fin si no existen
+      try {
+        await client.query(`ALTER TABLE procesos ADD COLUMN hora_inicio TIMESTAMP, ADD COLUMN hora_fin TIMESTAMP;`);
+        console.log('✅ Columnas hora_inicio y hora_fin agregadas a la tabla procesos exitosamente.');
+      } catch (err) {
+        // Ignoramos el error si las columnas ya existen (código 42701: duplicate_column)
+        if (err.code !== '42701') {
+          console.warn('⚠️ Nota sobre columnas de hora:', err.message);
+        }
+      }
+
     } catch (err) {
       console.error('❌ Error creando/verificando tablas en PostgreSQL:', err);
     } finally {
@@ -446,7 +457,9 @@ app.post('/api/inspecciones', async (req, res) => {
   const client = await pool.connect(); 
   try {
     await client.query('BEGIN'); 
-    const { numProceso, exportadora, csg, variedad, estado, cajas } = req.body;
+    
+    // Capturamos horaInicio y horaFin
+    const { numProceso, exportadora, csg, variedad, estado, cajas, horaInicio, horaFin } = req.body;
 
     const expRes = await client.query('SELECT id FROM exportadoras WHERE nombre = $1', [exportadora]);
     if (expRes.rows.length === 0) throw new Error(`La exportadora "${exportadora}" no existe.`);
@@ -457,9 +470,11 @@ app.post('/api/inspecciones', async (req, res) => {
     const huertoRes = await client.query('SELECT id FROM huertos WHERE csg = $1', [csg]);
     if (huertoRes.rows.length === 0) throw new Error(`El huerto con CSG "${csg}" no existe.`);
 
+    // Inyectamos hora_inicio y hora_fin
     const procRes = await client.query(
-      `INSERT INTO procesos (num_proceso, exportadora_id, huerto_id, variedad_id, estado) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [numProceso, expRes.rows[0].id, huertoRes.rows[0].id, varRes.rows[0].id, estado || 'Aprobado']
+      `INSERT INTO procesos (num_proceso, exportadora_id, huerto_id, variedad_id, estado, hora_inicio, hora_fin) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      [numProceso, expRes.rows[0].id, huertoRes.rows[0].id, varRes.rows[0].id, estado || 'Aprobado', horaInicio || null, horaFin || null]
     );
     const procesoId = procRes.rows[0].id;
 
@@ -506,8 +521,20 @@ app.post('/api/inspecciones', async (req, res) => {
 // ==========================================
 app.get('/api/inspecciones', async (req, res) => {
   try {
+    // Solicitamos también hora_inicio y hora_fin
     const procRes = await pool.query(`
-      SELECT p.id, p.fecha, p.num_proceso as "numProceso", p.estado, e.nombre as exportadora, h.csg, h.productor, v.nombre as variedad
+      SELECT 
+        p.id, 
+        p.fecha, 
+        p.num_proceso as "numProceso", 
+        p.estado, 
+        p.hora_inicio as "horaInicio",
+        p.hora_fin as "horaFin",
+        e.nombre as exportadora, 
+        h.csg, 
+        h.productor, 
+        h.nombre_huerto as huerto, 
+        v.nombre as variedad
       FROM procesos p
       JOIN exportadoras e ON p.exportadora_id = e.id
       JOIN huertos h ON p.huerto_id = h.id
@@ -576,7 +603,7 @@ app.put('/api/inspecciones/:id', async (req, res) => {
   try {
     await client.query('BEGIN'); 
     const procesoId = req.params.id;
-    const { numProceso, exportadora, csg, variedad, estado, cajas } = req.body; 
+    const { numProceso, exportadora, csg, variedad, estado, cajas, horaInicio, horaFin } = req.body; 
 
     if (numProceso && exportadora && csg && variedad) {
       const expRes = await client.query('SELECT id FROM exportadoras WHERE nombre = $1', [exportadora]);
@@ -588,11 +615,13 @@ app.put('/api/inspecciones/:id', async (req, res) => {
       const huertoRes = await client.query('SELECT id FROM huertos WHERE csg = $1', [csg]);
       if (huertoRes.rows.length === 0) throw new Error(`El huerto con CSG "${csg}" no existe.`);
 
+      // Actualizamos todo, manteniendo las horas si llegan nulas por alguna razón
       await client.query(
         `UPDATE procesos 
-         SET num_proceso = $1, exportadora_id = $2, huerto_id = $3, variedad_id = $4, estado = $5
+         SET num_proceso = $1, exportadora_id = $2, huerto_id = $3, variedad_id = $4, estado = $5,
+             hora_inicio = COALESCE($7, hora_inicio), hora_fin = COALESCE($8, hora_fin)
          WHERE id = $6`,
-        [numProceso, expRes.rows[0].id, huertoRes.rows[0].id, varRes.rows[0].id, estado || 'Aprobado', procesoId]
+        [numProceso, expRes.rows[0].id, huertoRes.rows[0].id, varRes.rows[0].id, estado || 'Aprobado', procesoId, horaInicio || null, horaFin || null]
       );
     }
 
@@ -674,10 +703,13 @@ app.get('/api/procesos/:id/informe', async (req, res) => {
   try {
     const { id } = req.params;
     
+    // Solicitamos horaInicio y horaFin
     const query = `
       SELECT 
         p.id AS proceso_id, 
         p.fecha, 
+        p.hora_inicio as "horaInicio",
+        p.hora_fin as "horaFin",
         h.nombre_huerto AS huerto,
         h.productor,
         h.csg,

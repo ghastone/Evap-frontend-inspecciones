@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Login from './modules/dashboardLive/Login';
 import DashboardLiveView from './modules/dashboardLive/DashboardLiveView';
+import DashboardResumenDiario from './modules/dashboard/DashboardResumenDiario';
+import DashboardHistoricoTemporada from './modules/dashboard/DashboardHistorico'; // Corregido el nombre de importación
 
 import NuevoProceso from './modules/inspeccion/NuevoProceso';
 import InspeccionModule from './modules/inspeccion/InspeccionModule';
@@ -10,11 +12,11 @@ import GestionExportadoras from './modules/ajustes/GestionExportadoras';
 import GestionVariedades from './modules/ajustes/GestionVariedades';
 import TablaHuertos from './modules/ajustes/TablaHuertos';
 import ParametrosCalificacion from './modules/ajustes/ParametrosCalificacion';
-import GestionUsuarios from './modules/ajustes/GestionUsuarios'; // <-- NUEVO IMPORT
+import GestionUsuarios from './modules/ajustes/GestionUsuarios'; 
 
 import { 
   LogOut, PlusCircle, ClipboardList, LayoutDashboard, Settings, User, 
-  ChevronLeft, ChevronRight, ChevronDown, X, Users
+  ChevronLeft, ChevronRight, ChevronDown, X
 } from 'lucide-react';
 
 export default function App() {
@@ -26,6 +28,7 @@ export default function App() {
   const [currentView, setCurrentView] = useState('home');
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [showAjustes, setShowAjustes] = useState(false);
+  const [dashboardsAbierto, setDashboardsAbierto] = useState(true);
   const [showDrawer, setShowDrawer] = useState(false);
   const [datosProcesoActivo, setDatosProcesoActivo] = useState(null);
 
@@ -112,7 +115,7 @@ export default function App() {
     
     setShowDrawer(false);
 
-    if (['historial', 'dashboard', 'ajustes-exportadoras', 'ajustes-variedades', 'ajustes-huertos', 'ajustes-parametros', 'ajustes-usuarios'].includes(nuevaVista)) {
+    if (['historial', 'ajustes-exportadoras', 'ajustes-variedades', 'ajustes-huertos', 'ajustes-parametros', 'ajustes-usuarios'].includes(nuevaVista)) {
       setIsCollapsed(true);
     } else if (nuevaVista === 'nuevo-proceso' || nuevaVista === 'home') {
       setIsCollapsed(false);
@@ -129,7 +132,7 @@ export default function App() {
   const confirmarSalida = () => {
     setCurrentView(vistaPendiente);
     
-    if (['historial', 'dashboard', 'ajustes-exportadoras', 'ajustes-variedades', 'ajustes-huertos', 'ajustes-parametros', 'ajustes-usuarios'].includes(vistaPendiente)) {
+    if (['historial', 'ajustes-exportadoras', 'ajustes-variedades', 'ajustes-huertos', 'ajustes-parametros', 'ajustes-usuarios'].includes(vistaPendiente)) {
       setIsCollapsed(true);
     } else if (vistaPendiente === 'nuevo-proceso' || vistaPendiente === 'home') {
       setIsCollapsed(false);
@@ -232,6 +235,7 @@ export default function App() {
     setCurrentView('home');
     setIsCollapsed(false);
     setShowAjustes(false);
+    setDashboardsAbierto(true);
     setShowDrawer(false);
     setDatosProcesoActivo(null);
   };
@@ -292,7 +296,7 @@ export default function App() {
   }
 
   // Rutas que ocupan pantalla completa sin Sidebar tradicional (para móvil o procesos en vivo)
-  if (currentView === 'nuevo-proceso' || currentView === 'inspeccion' || currentView === 'dashboard') {
+  if (['nuevo-proceso', 'inspeccion', 'dashboard_live', 'dashboard_resumen', 'dashboard_historico'].includes(currentView)) {
     return (
       <div className="w-screen h-screen overflow-hidden bg-slate-50 relative">
         {currentView === 'nuevo-proceso' && (
@@ -323,8 +327,14 @@ export default function App() {
             }}
           />
         )}
-        {currentView === 'dashboard' && (
+        {currentView === 'dashboard_live' && (
           <DashboardLiveView onClose={() => intentarNavegar('home')} onAbrirMenu={() => setShowDrawer(true)} />
+        )}
+        {currentView === 'dashboard_resumen' && (
+          <DashboardResumenDiario onClose={() => intentarNavegar('home')} onAbrirMenu={() => setShowDrawer(true)} />
+        )}
+        {currentView === 'dashboard_historico' && (
+          <DashboardHistoricoTemporada onClose={() => intentarNavegar('home')} onAbrirMenu={() => setShowDrawer(true)} />
         )}
 
         {/* DRAWER MÓVIL */}
@@ -338,7 +348,6 @@ export default function App() {
               </div>
               <nav className="flex-1 py-6 px-4 space-y-2 overflow-y-auto custom-scrollbar">
                 
-                {/* Permisos Drawer: Admin y QC pueden Crear */}
                 {['admin', 'qc'].includes(user.role) && (
                   <button onClick={() => intentarNavegar('nuevo-proceso')} className="w-full flex items-center px-4 py-3 rounded-xl bg-orange-50 text-[#E96008] font-bold text-left text-sm">
                     <PlusCircle className="w-5 h-5 text-[#E96008] shrink-0 mr-3" /><span>Crear Proceso</span>
@@ -349,12 +358,47 @@ export default function App() {
                   <ClipboardList className="w-5 h-5 text-blue-600 shrink-0 mr-3" /><span>Historial</span>
                 </button>
                 
-                {/* Todos pueden ver Dashboard */}
-                <button onClick={() => intentarNavegar('dashboard')} className="w-full flex items-center px-4 py-3 rounded-xl text-slate-600 hover:bg-slate-50 font-semibold text-left text-sm">
-                  <LayoutDashboard className="w-5 h-5 text-[#E96008] shrink-0 mr-3" /><span>Dashboard Live</span>
-                </button>
+                {/* SECCIÓN ANÁLISIS EN DRAWER MÓVIL */}
+                <div className="pt-4 mt-2 mb-2 border-t border-slate-100"><p className="px-4 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Análisis</p></div>
+                <div className="flex flex-col">
+                  <button onClick={() => setDashboardsAbierto(!dashboardsAbierto)} className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-slate-600 hover:bg-slate-50 font-semibold text-left text-sm">
+                    <div className="flex items-center"><LayoutDashboard className="w-5 h-5 text-[#E96008] shrink-0 mr-3" /><span>Dashboards</span></div>
+                    <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${dashboardsAbierto ? 'rotate-180' : ''}`} />
+                  </button>
+                  {dashboardsAbierto && (
+                    <div className="mt-1 flex flex-col space-y-1">
+                      <button 
+                        onClick={() => { intentarNavegar('dashboard_live'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }} 
+                        className={`relative flex items-center w-full text-left pl-12 pr-4 py-2.5 rounded-xl transition-all ${currentView === 'dashboard_live' ? 'bg-orange-50 text-[#E96008]' : 'text-slate-800 hover:bg-slate-50'}`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={`w-1.5 h-1.5 rounded-full ${currentView === 'dashboard_live' ? 'bg-[#E96008] animate-pulse' : 'bg-slate-400'}`}></span>
+                          <span className="font-extrabold text-[14px]">Evap <span className="font-semibold text-[12px] opacity-70">(análisis en vivo)</span></span>
+                        </div>
+                      </button>
+                      
+                      <div className="h-px bg-slate-200/70 mx-10 my-0.5"></div>
+                      
+                      <button 
+                        onClick={() => { intentarNavegar('dashboard_resumen'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }}
+                        className={`w-full text-left pl-12 pr-4 py-2.5 rounded-xl transition-all font-bold text-[14px] ${currentView === 'dashboard_resumen' ? 'bg-orange-50 text-[#E96008]' : 'text-slate-700 hover:bg-slate-50'}`}
+                      >
+                        Resumen Diario
+                      </button>
 
-                {/* Permisos Drawer: Solo Admin ve Ajustes */}
+                      <div className="h-px bg-slate-200/70 mx-10 my-0.5"></div>
+                      
+                      <button 
+                        onClick={() => { intentarNavegar('dashboard_historico'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }}
+                        className={`w-full text-left pl-12 pr-4 py-2.5 rounded-xl transition-all font-bold text-[14px] ${currentView === 'dashboard_historico' ? 'bg-orange-50 text-[#E96008]' : 'text-slate-700 hover:bg-slate-50'}`}
+                      >
+                        Histórico Temporada
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* SECCIÓN AJUSTES EN DRAWER MÓVIL */}
                 {user.role === 'admin' && (
                   <>
                     <div className="pt-4 mt-2 mb-2 border-t border-slate-100"><p className="px-4 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Administración</p></div>
@@ -410,7 +454,6 @@ export default function App() {
         
         <nav className="flex-1 py-6 px-3 space-y-2 overflow-y-auto custom-scrollbar">
           
-          {/* Permiso Sidebar: Admin y QC pueden Crear */}
           {['admin', 'qc'].includes(user.role) && (
             <button onClick={() => intentarNavegar('nuevo-proceso')} className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'px-4'} py-3 rounded-xl transition-all text-left ${currentView === 'nuevo-proceso' ? 'bg-orange-50 text-[#E96008] font-bold' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'}`}>
               <PlusCircle className="w-6 h-6 text-green-600 shrink-0" />{!isCollapsed && <span className="text-sm truncate ml-3 font-semibold">Crear Proceso</span>}
@@ -421,20 +464,73 @@ export default function App() {
             <ClipboardList className="w-6 h-6 text-blue-600 shrink-0" />{!isCollapsed && <span className="text-sm truncate ml-3">Historial</span>}
           </button>
           
-          <div className="pt-4 mt-2 mb-2 border-t border-slate-100">{!isCollapsed && <p className="px-4 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Análisis</p>}</div>
-          <button onClick={() => intentarNavegar('dashboard')} className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'px-4'} py-3 rounded-xl transition-all text-left ${currentView === 'dashboard' ? 'bg-orange-50 text-[#E96008] font-bold' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'}`}>
-            <LayoutDashboard className="w-6 h-6 text-[#E96008] shrink-0" />{!isCollapsed && <span className="text-sm truncate ml-3">Dashboard Live</span>}
-          </button>
+          {/* SECCIÓN ANÁLISIS AGRUPADA */}
+          <div className="pt-4 mt-2 mb-2 border-t border-slate-100">
+            {!isCollapsed && <p className="px-4 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Análisis</p>}
+          </div>
+          <div className="flex flex-col">
+            <button 
+              onClick={() => { if (isCollapsed) { setIsCollapsed(false); setDashboardsAbierto(true); } else { setDashboardsAbierto(!dashboardsAbierto); } }} 
+              className={`w-full flex items-center justify-between ${isCollapsed ? 'justify-center px-0' : 'px-4'} py-3 rounded-xl transition-all text-left ${dashboardsAbierto && !isCollapsed ? 'bg-slate-50 text-slate-900 font-bold' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'}`}
+            >
+              <div className="flex items-center">
+                <LayoutDashboard className="w-6 h-6 text-[#E96008] shrink-0" />
+                {!isCollapsed && <span className="text-sm truncate ml-3">Dashboards</span>}
+              </div>
+              {!isCollapsed && <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${dashboardsAbierto ? 'rotate-180' : ''}`} />}
+            </button>
+            
+            {dashboardsAbierto && !isCollapsed && (
+              <div className="mt-1 flex flex-col space-y-1 animate-fade-in">
+                <button 
+                  onClick={() => { intentarNavegar('dashboard_live'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }} 
+                  className={`relative flex items-center w-full text-left pl-12 pr-4 py-2.5 rounded-xl transition-all ${currentView === 'dashboard_live' ? 'bg-orange-50 text-[#E96008]' : 'text-slate-800 hover:bg-slate-50'}`}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className={`w-1.5 h-1.5 rounded-full ${currentView === 'dashboard_live' ? 'bg-[#E96008] animate-pulse' : 'bg-slate-400'}`}></span>
+                    <span className="font-extrabold text-[14px]">Evap <span className="font-semibold text-[12px] opacity-70">(análisis en vivo)</span></span>
+                  </div>
+                </button>
+                
+                <div className="h-px bg-slate-200/70 mx-10 my-0.5"></div>
+                
+                <button 
+                  onClick={() => { intentarNavegar('dashboard_resumen'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }} 
+                  className={`w-full text-left pl-12 pr-4 py-2.5 rounded-xl transition-all font-bold text-[14px] ${currentView === 'dashboard_resumen' ? 'bg-orange-50 text-[#E96008]' : 'text-slate-700 hover:bg-slate-50'}`}
+                >
+                  Resumen Diario
+                </button>
+
+                <div className="h-px bg-slate-200/70 mx-10 my-0.5"></div>
+                
+                <button 
+                  onClick={() => { intentarNavegar('dashboard_historico'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }} 
+                  className={`w-full text-left pl-12 pr-4 py-2.5 rounded-xl transition-all font-bold text-[14px] ${currentView === 'dashboard_historico' ? 'bg-orange-50 text-[#E96008]' : 'text-slate-700 hover:bg-slate-50'}`}
+                >
+                  Histórico Temporada
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* Permiso Sidebar: Solo Admin ve Ajustes */}
           {user.role === 'admin' && (
             <>
-              <div className="pt-4 mt-2 mb-2 border-t border-slate-100">{!isCollapsed && <p className="px-4 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Administración</p>}</div>
+              <div className="pt-4 mt-2 mb-2 border-t border-slate-100">
+                {!isCollapsed && <p className="px-4 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Administración</p>}
+              </div>
               <div className="flex flex-col">
-                <button onClick={() => { if (isCollapsed) setIsCollapsed(false); setShowAjustes(!showAjustes); }} className={`w-full flex items-center justify-between ${isCollapsed ? 'justify-center px-0' : 'px-4'} py-3 rounded-xl transition-all text-left ${showAjustes ? 'bg-slate-50 text-slate-900 font-bold' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'}`}>
-                  <div className="flex items-center"><Settings className="w-6 h-6 text-slate-600 shrink-0" />{!isCollapsed && <span className="text-sm truncate ml-3">Ajustes</span>}</div>
+                <button 
+                  onClick={() => { if (isCollapsed) setIsCollapsed(false); setShowAjustes(!showAjustes); }} 
+                  className={`w-full flex items-center justify-between ${isCollapsed ? 'justify-center px-0' : 'px-4'} py-3 rounded-xl transition-all text-left ${showAjustes ? 'bg-slate-50 text-slate-900 font-bold' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'}`}
+                >
+                  <div className="flex items-center">
+                    <Settings className="w-6 h-6 text-slate-600 shrink-0" />
+                    {!isCollapsed && <span className="text-sm truncate ml-3">Ajustes</span>}
+                  </div>
                   {!isCollapsed && <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showAjustes ? 'rotate-180' : ''}`} />}
                 </button>
+                
                 {showAjustes && !isCollapsed && (
                   <div className="mt-1 pl-12 flex flex-col space-y-1 animate-fade-in">
                     <button onClick={() => intentarNavegar('ajustes-exportadoras')} className={`text-left text-sm py-2 px-3 rounded-lg transition-colors ${currentView === 'ajustes-exportadoras' ? 'text-[#E96008] font-bold bg-orange-50' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'}`}>Exportadoras</button>
@@ -484,7 +580,7 @@ export default function App() {
         {currentView === 'historial' && (
           <HistorialProcesosView 
             onVerResumen={(proceso) => console.log('Resumen:', proceso)} 
-            userRole={user.role} // <-- Enviamos el rol al historial para bloquear la edición a la Gerencia si es necesario en el futuro
+            userRole={user.role}
           />
         )}
         {currentView === 'ajustes-exportadoras' && <div className="p-6 md:p-8 overflow-y-auto h-full animate-fade-in"><GestionExportadoras exportadoras={dbData.exportadoras} setExportadoras={(nuevas) => setDbData(prev => ({ ...prev, exportadoras: nuevas }))} /></div>}

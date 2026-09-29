@@ -20,10 +20,13 @@ export default function Login({ onLogin }) {
     setCargando(true);
 
     try {
-      // Detección automática de la API (Producción vs Desarrollo)
-      const API_URL = window.location.hostname.includes('goldanda.cl')
+      // Detección automática y robusta para red local e internet
+      // window.location.hostname obtiene la IP exacta (ej. 192.168.x.x) si estás en la red local
+      const hostname = window.location.hostname || 'localhost';
+      
+      const API_URL = hostname.includes('goldanda.cl')
         ? 'https://evap.maq.goldanda.cl' 
-        : `http://${window.location.hostname || 'localhost'}:3001`;
+        : `http://${hostname}:3001`;
 
       const response = await fetch(`${API_URL}/api/login`, {
         method: 'POST',

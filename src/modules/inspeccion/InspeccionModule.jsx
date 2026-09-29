@@ -20,13 +20,16 @@ export default function InspeccionModule({
   onAbrirMenu,
   onVolver
 }) {
-  const { numProceso, exportadoraSel, csgSel, variedadSel, productorNombre } = datosProceso || {};
+  const { numProceso, exportadoraSel, csgSel, variedadSel, productorNombre, huertoNombre } = datosProceso || {};
 
   const [tabDefectos, setTabDefectos] = useState('calidad'); 
   const [showModalFinalizar, setShowModalFinalizar] = useState(false);
   const [showModalCancelar, setShowModalCancelar] = useState(false);
   const [mensajeExito, setMensajeExito] = useState('');
   const [haVistoCondicion, setHaVistoCondicion] = useState(false);
+
+  // === ESTADO: HORA DE INICIO EXACTA ===
+  const [horaInicio, setHoraInicio] = useState(null);
 
   // ESTADOS PRINCIPALES DE LOS DATOS
   const [cajas, setCajas] = useState([]);
@@ -60,6 +63,12 @@ export default function InspeccionModule({
         const parsed = JSON.parse(savedDraft);
         setCajas(parsed.cajas || []);
         if (parsed.cajaActual) setCajaActual(parsed.cajaActual);
+        
+        // Restaurar hora de inicio si estaba en el borrador
+        if (parsed.horaInicio) {
+          setHoraInicio(parsed.horaInicio);
+        }
+
         setMensajeExito('Borrador restaurado correctamente');
         setTimeout(() => setMensajeExito(''), 3000);
       }
@@ -68,14 +77,14 @@ export default function InspeccionModule({
     }
   }, [numProceso, DRAFT_KEY]);
 
-  // 2. Guardar borrador automáticamente ante CUALQUIER cambio en cajas o cajaActual
+  // 2. Guardar borrador automáticamente ante CUALQUIER cambio
   useEffect(() => {
     if (!numProceso) return;
-    const draft = { cajas, cajaActual };
+    const draft = { cajas, cajaActual, horaInicio };
     localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
-  }, [cajas, cajaActual, numProceso, DRAFT_KEY]);
+  }, [cajas, cajaActual, horaInicio, numProceso, DRAFT_KEY]);
 
-  // Función para limpiar el borrador una vez finalizado o cancelado el proceso
+  // Función para limpiar el borrador
   const limpiarBorrador = () => {
     localStorage.removeItem(DRAFT_KEY);
   };
@@ -84,17 +93,26 @@ export default function InspeccionModule({
   // Envío de datos al Dashboard en vivo (Broadcast)
   useEffect(() => {
     const payload = {
-      numProceso, exportadora: exportadoraSel, productor: productorNombre, variedad: variedadSel, csg: csgSel,
-      cajas: cajas, cajaActual: headerCompleto ? cajaActual : null 
+      numProceso, exportadora: exportadoraSel, productor: productorNombre, huerto: huertoNombre, variedad: variedadSel, csg: csgSel,
+      cajas: cajas, cajaActual: headerCompleto ? cajaActual : null,
+      horaInicio 
     };
     fetch(`${API_URL}/api/live`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     }).catch(err => console.log('Error enviando datos en vivo:', err));
-  }, [cajas, cajaActual, headerCompleto, numProceso, exportadoraSel, productorNombre, variedadSel, csgSel, API_URL]);
+  }, [cajas, cajaActual, headerCompleto, numProceso, exportadoraSel, productorNombre, huertoNombre, variedadSel, csgSel, horaInicio, API_URL]);
+
+  // === FUNCIÓN CLAVE: ARRANCA EL RELOJ EN EL PRIMER CLICK/CAMBIO ===
+  const registrarInicioProceso = () => {
+    if (!horaInicio) {
+      setHoraInicio(new Date().toISOString());
+    }
+  };
 
   const actualizarDefecto = (tipo, def, valor) => {
+    registrarInicioProceso(); // Arranca el reloj si anotan un defecto
     const val = valor === '' ? '' : Math.max(0, parseInt(valor) || 0);
     setCajaActual(prev => ({ 
       ...prev, [tipo === 'calidad' ? 'defCalidad' : 'defCondicion']: { ...prev[tipo === 'calidad' ? 'defCalidad' : 'defCondicion'], [def]: val } 
@@ -121,6 +139,7 @@ export default function InspeccionModule({
   };
 
   const manejarCambioBrix = (e, esEdicion = false) => {
+    if (!esEdicion) registrarInicioProceso(); // Arranca el reloj
     let val = e.target.value.replace(',', '.');
     val = val.replace(/[^0-9.]/g, ''); 
     if ((val.match(/\./g) || []).length > 1) return; 
@@ -142,6 +161,7 @@ export default function InspeccionModule({
       }
     }
 
+    registrarInicioProceso(); // Por seguridad, si de alguna forma mágica guardan sin escribir nada
     setCajas([...cajas, { ...cajaActual, id: Date.now() }]);
     setCajaActual({ 
       numCaja: cajas.length + 2, frutos: '100', calibre: '', brix: '', color: '', 
@@ -210,7 +230,7 @@ export default function InspeccionModule({
     } catch (err) {
       console.log('Error limpiando live process:', err);
     }
-    limpiarBorrador(); // Borramos el autoguardado porque el usuario decidió cancelar todo
+    limpiarBorrador(); 
     setShowModalCancelar(false);
     if (onVolver) onVolver();
   };
@@ -253,8 +273,23 @@ export default function InspeccionModule({
     let cajasFinales = headerCompleto ? [...cajas, cajaActual] : [...cajas];
     if (cajasFinales.length === 0) return alert("No has evaluado ninguna caja.");
 
+    // === AQUÍ SE SELLA LA HORA DE FIN JUSTO AL HACER CLICK EN GUARDAR ===
+    const horaFinCalculada = new Date().toISOString();
+
     try {
-      const payload = { numProceso, exportadora: exportadoraSel, csg: csgSel, variedad: variedadSel, estado: estadoGlobal, cajas: cajasFinales };
+      const payload = { 
+        numProceso, 
+        exportadora: exportadoraSel, 
+        csg: csgSel, 
+        variedad: variedadSel, 
+        estado: estadoGlobal, 
+        cajas: cajasFinales,
+        productor: productorNombre,
+        huerto: huertoNombre,
+        horaInicio: horaInicio,    // Se envía el momento del primer click
+        horaFin: horaFinCalculada  // Se envía el momento de este click
+      };
+      
       const response = await fetch(`${API_URL}/api/inspecciones`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
       });
@@ -265,7 +300,7 @@ export default function InspeccionModule({
           headers: { 'Content-Type': 'application/json' }, 
           body: JSON.stringify({}) 
         });
-        limpiarBorrador(); // Eliminamos el autoguardado porque ya se envió exitosamente al servidor
+        limpiarBorrador(); 
         alert("¡Proceso guardado exitosamente!");
         if (onFinishedInspection) onFinishedInspection(parseInt(numProceso, 10));
       } else { alert("❌ ERROR DEL SERVIDOR: " + (data.error || "Error al guardar")); }
@@ -295,8 +330,23 @@ export default function InspeccionModule({
             )}
             <div>
               <h1 className="text-[19px] md:text-2xl font-black text-[#0F172A] leading-tight">Inspección producto<br className="md:hidden"/> terminado</h1>
-              {/* Texto Productor / Variedad ajustado a 14px (text-sm) en móvil */}
-              <p className="text-sm md:text-sm text-slate-500 font-semibold uppercase">{productorNombre || 'Ingreso en vivo'} - {variedadSel}</p>
+              
+              <div className="flex flex-wrap items-center gap-2 mt-1">
+                <p className="text-sm md:text-sm text-slate-500 font-semibold uppercase">
+                  {huertoNombre || productorNombre || 'Ingreso en vivo'} - {variedadSel}
+                </p>
+                {/* === CÁPSULA VISUAL DEL TIEMPO === */}
+                {horaInicio ? (
+                  <span className="text-[#E96008] font-black bg-orange-50 px-2 py-0.5 rounded-md border border-orange-100 whitespace-nowrap text-xs shadow-sm">
+                    INICIO: {new Date(horaInicio).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                ) : (
+                  <span className="text-slate-400 font-bold bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200 whitespace-nowrap text-[10px] animate-pulse">
+                    ESPERANDO INICIO...
+                  </span>
+                )}
+              </div>
+
             </div>
           </div>
           <img src="/Logo_goldanda.png" alt="Logo" className="h-7 md:h-10 object-contain hidden sm:block" />
@@ -311,7 +361,6 @@ export default function InspeccionModule({
           
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-y-2 md:gap-y-4 gap-x-2 text-white">
             <div className="flex flex-col border-r border-white/20 pr-1 md:pr-2">
-              {/* Etiquetas ajustadas a 11px */}
               <span className="text-[11px] font-medium opacity-80 mb-0.5">Proceso</span>
               <span className="text-base md:text-xl font-black">{numProceso || '-'}</span>
             </div>
@@ -376,7 +425,7 @@ export default function InspeccionModule({
           </div>
         )}
 
-        {/* EVALUANDO NUEVA CAJA - INPUTS REDUCIDOS */}
+        {/* EVALUANDO NUEVA CAJA */}
         <div className="bg-white border border-slate-200 rounded-2xl p-3 md:p-6 shadow-sm w-full relative">
           {cajaEnEdicion && <div className="absolute inset-0 bg-white/60 backdrop-blur-[1px] z-10 rounded-2xl"></div>}
 
@@ -384,7 +433,6 @@ export default function InspeccionModule({
             <span className="text-slate-600 font-bold text-sm md:text-lg">
               Evaluando nueva caja <span className="text-[#E96008] text-lg md:text-2xl font-black ml-1">#{cajaActual.numCaja}</span>
             </span>
-            {/* Cápsulas de rendimiento a 11px */}
             <div className="flex items-center gap-2 md:gap-3 text-[11px] md:text-sm font-bold">
               <span className="text-slate-500 hidden sm:inline">Rendimiento:</span>
               <span className="bg-orange-50 text-[#E96008] px-2 py-0.5 md:px-2.5 md:py-1 rounded-lg">Cal: {rend.cal}%</span>
@@ -395,13 +443,29 @@ export default function InspeccionModule({
           
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2 md:gap-4">
             <div className="bg-slate-50 p-2 md:p-3 rounded-xl border border-slate-200/80 flex items-center justify-between">
-              {/* Labels a 12px (text-xs) */}
               <span className="text-xs font-bold text-slate-700">Muestra (frutos):</span>
-              <input type="number" inputMode="numeric" onWheel={(e) => e.target.blur()} value={cajaActual.frutos} onChange={(e) => setCajaActual({ ...cajaActual, frutos: e.target.value })} className={`w-24 md:w-28 text-center font-bold text-base md:text-lg bg-white border border-slate-300 rounded-lg md:rounded-xl h-8 md:h-10 outline-none focus:border-[#E96008] ${hideSpinners}`} />
+              <input 
+                type="number" 
+                inputMode="numeric" 
+                onWheel={(e) => e.target.blur()} 
+                value={cajaActual.frutos} 
+                onChange={(e) => {
+                  registrarInicioProceso();
+                  setCajaActual({ ...cajaActual, frutos: e.target.value });
+                }} 
+                className={`w-24 md:w-28 text-center font-bold text-base md:text-lg bg-white border border-slate-300 rounded-lg md:rounded-xl h-8 md:h-10 outline-none focus:border-[#E96008] ${hideSpinners}`} 
+              />
             </div>
             <div className="bg-slate-50 p-2 md:p-3 rounded-xl border border-slate-200/80 flex items-center justify-between">
               <span className="text-xs font-bold text-slate-700">Calibre:</span>
-              <select value={cajaActual.calibre} onChange={(e) => setCajaActual({ ...cajaActual, calibre: e.target.value })} className="w-24 md:w-28 text-center font-bold text-xs md:text-sm bg-white border border-slate-300 rounded-lg md:rounded-xl h-8 md:h-10 outline-none focus:border-[#E96008]">
+              <select 
+                value={cajaActual.calibre} 
+                onChange={(e) => {
+                  registrarInicioProceso();
+                  setCajaActual({ ...cajaActual, calibre: e.target.value });
+                }} 
+                className="w-24 md:w-28 text-center font-bold text-xs md:text-sm bg-white border border-slate-300 rounded-lg md:rounded-xl h-8 md:h-10 outline-none focus:border-[#E96008]"
+              >
                 <option value="">Seleccionar</option>
                 <option value="L">L</option><option value="XL">XL</option><option value="J">J</option>
                 <option value="2J">2J</option><option value="3J">3J</option><option value="4J">4J</option><option value="5J">5J</option>
@@ -409,7 +473,14 @@ export default function InspeccionModule({
             </div>
             <div className="bg-slate-50 p-2 md:p-3 rounded-xl border border-slate-200/80 flex items-center justify-between">
               <span className="text-xs font-bold text-slate-700">Color embalaje:</span>
-              <select value={cajaActual.color} onChange={(e) => setCajaActual({ ...cajaActual, color: e.target.value })} className="w-24 md:w-28 text-center font-bold text-xs md:text-sm bg-white border border-slate-300 rounded-lg md:rounded-xl h-8 md:h-10 outline-none focus:border-[#E96008]">
+              <select 
+                value={cajaActual.color} 
+                onChange={(e) => {
+                  registrarInicioProceso();
+                  setCajaActual({ ...cajaActual, color: e.target.value });
+                }} 
+                className="w-24 md:w-28 text-center font-bold text-xs md:text-sm bg-white border border-slate-300 rounded-lg md:rounded-xl h-8 md:h-10 outline-none focus:border-[#E96008]"
+              >
                 <option value="">Seleccionar</option>
                 <option value="Light">Light</option><option value="Dark">Dark</option>
               </select>
@@ -430,9 +501,8 @@ export default function InspeccionModule({
         {/* DEFECTOS */}
         <div className={`bg-white border border-slate-200 rounded-2xl p-4 md:p-6 shadow-sm transition-all ${!headerCompleto ? 'opacity-50 pointer-events-none' : ''} ${cajaEnEdicion ? 'pointer-events-none opacity-50' : ''}`}>
           <div className="flex border-b border-slate-200 mb-4 gap-2">
-            {/* Pestañas a 13px */}
             <button 
-              onClick={() => setTabDefectos('calidad')} 
+              onClick={() => { registrarInicioProceso(); setTabDefectos('calidad'); }} 
               className={`flex-1 py-2 md:py-3 px-2 md:px-4 font-extrabold text-[13px] md:text-base border-b-2 transition-all flex items-center justify-center gap-2 ${tabDefectos === 'calidad' ? 'border-[#E96008] text-[#E96008] bg-orange-50/50 rounded-t-xl' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
             >
               Defectos de Calidad
@@ -440,6 +510,7 @@ export default function InspeccionModule({
             </button>
             <button 
               onClick={() => { 
+                registrarInicioProceso();
                 setTabDefectos('condicion'); 
                 setHaVistoCondicion(true); 
               }} 
@@ -462,7 +533,6 @@ export default function InspeccionModule({
                 const count = cajaActual.defCalidad[def];
                 return (
                   <div key={def} className="flex items-center justify-between gap-2 p-1 border-b border-slate-100 sm:border-0">
-                    {/* Nombre Defecto a 13px */}
                     <span className="text-[13px] md:text-sm font-semibold text-slate-700 flex-1 truncate">{def}</span>
                     <div className="flex items-center gap-2">
                       <input type="number" inputMode="numeric" disabled={!headerCompleto} onWheel={(e) => e.target.blur()} value={count === 0 ? '' : count} onChange={(e) => actualizarDefecto('calidad', def, e.target.value)} className={`w-14 md:w-16 h-9 md:h-11 border border-slate-300 rounded-lg text-center font-bold text-sm md:text-base outline-none focus:border-[#E96008] shadow-sm ${hideSpinners} ${!headerCompleto ? 'bg-slate-50' : 'bg-white'}`} />
@@ -480,7 +550,6 @@ export default function InspeccionModule({
                 const count = cajaActual.defCondicion[def];
                 return (
                   <div key={def} className="flex items-center justify-between gap-2 p-1 border-b border-slate-100 sm:border-0">
-                    {/* Nombre Defecto a 13px */}
                     <span className="text-[13px] md:text-sm font-semibold text-slate-700 flex-1 truncate">{def}</span>
                     <div className="flex items-center gap-2">
                       <input type="number" inputMode="numeric" disabled={!headerCompleto} onWheel={(e) => e.target.blur()} value={count === 0 ? '' : count} onChange={(e) => actualizarDefecto('condicion', def, e.target.value)} className={`w-14 md:w-16 h-9 md:h-11 border border-slate-300 rounded-lg text-center font-bold text-sm md:text-base outline-none focus:border-red-500 shadow-sm ${hideSpinners} ${!headerCompleto ? 'bg-slate-50' : 'bg-white'}`} />

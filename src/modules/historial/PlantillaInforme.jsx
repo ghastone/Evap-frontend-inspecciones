@@ -11,6 +11,23 @@ const formatearNombre = (texto) => {
     .join(' ');
 };
 
+// ================= CORRECCIÓN BUG HORA =================
+const formatearHora = (horaIsoStr) => {
+  if (!horaIsoStr) return null;
+  try {
+    const d = new Date(horaIsoStr);
+    if (isNaN(d.getTime())) return null;
+    
+    // Al guardar en PostgreSQL sin TimeZone, Node sumó horas extra al enviarla al navegador.
+    // Para revertirlo y mostrar la hora real, restamos el desfase exacto del navegador local.
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+
+    return d.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: true });
+  } catch (e) {
+    return null;
+  }
+};
+
 // ================= COMPONENTE ENCABEZADO DE MÓDULO =================
 const TituloModulo = ({ numero, titulo, width = "w-[120px]" }) => (
   <div className="relative pb-1.5 mb-2 border-b border-slate-100 flex items-center shrink-0">
@@ -86,6 +103,11 @@ const PlantillaInforme = React.forwardRef(({ datos }, ref) => {
       }
     } catch (e) {}
   }
+
+  // === GENERACIÓN DEL FORMATO DE HORA (Inicio - Fin) ===
+  const inicioStr = formatearHora(datos.horaInicio);
+  const finStr = formatearHora(datos.horaFin);
+  const horaInspeccion = (inicioStr && finStr) ? `${inicioStr} - ${finStr}` : '-';
 
   // 2. CÁLCULO DE DATOS MATEMÁTICOS
   const cajas = Array.isArray(datos.cajas) ? datos.cajas : [];
@@ -181,7 +203,7 @@ const PlantillaInforme = React.forwardRef(({ datos }, ref) => {
         </div>
       </div>
 
-      {/* 1. INFORMACIÓN GENERAL */}
+      {/* 1. INFORMACIÓN GENERAL CON NUEVO CAMPO "HORA INSPECCIÓN" */}
       <div className="bg-white border border-slate-200 rounded-xl p-2.5 mb-2 shadow-sm shrink-0">
         <TituloModulo numero="1" titulo="Información general" width="w-[140px]" />
         <div className="grid grid-cols-4 gap-y-2 gap-x-4">
@@ -201,9 +223,14 @@ const PlantillaInforme = React.forwardRef(({ datos }, ref) => {
             <p className="text-[9px] text-slate-400 uppercase tracking-wider font-black mb-0.5">CSG</p>
             <p className="font-bold text-xs text-slate-700">{csg}</p>
           </div>
-          <div className="col-span-2">
+          
+          <div className="col-span-1">
             <p className="text-[9px] text-slate-400 uppercase tracking-wider font-black mb-0.5">Huerto</p>
             <p className="font-bold text-xs text-slate-700 truncate">{huerto}</p>
+          </div>
+          <div className="col-span-1">
+            <p className="text-[9px] text-slate-400 uppercase tracking-wider font-black mb-0.5">Hora Inspección</p>
+            <p className="font-bold text-xs text-slate-700 truncate">{horaInspeccion}</p>
           </div>
           <div>
             <p className="text-[9px] text-slate-400 uppercase tracking-wider font-black mb-0.5">Variedad</p>
@@ -223,7 +250,7 @@ const PlantillaInforme = React.forwardRef(({ datos }, ref) => {
         <div className="bg-white border border-slate-200 rounded-xl p-2.5 w-[40%] shadow-sm flex flex-col justify-between">
           <TituloModulo numero="2" titulo="Resumen general" width="w-[120px]" />
           
-          {/* BANNER VERDE: Aumentado de py-4 a py-[18px] (aprox. 10%) */}
+          {/* BANNER VERDE */}
           <div className={`${estado === 'Objetado' ? 'bg-red-50/50 border-red-100 divide-red-100' : 'bg-emerald-50/40 border-emerald-100 divide-emerald-100'} border-2 rounded-xl py-[18px] flex justify-between items-center w-full mb-1 shrink-0 divide-x`}>
             <div className="flex flex-col items-center justify-center flex-1 gap-1 px-1">
               <p className="text-[8px] text-slate-500 font-black uppercase tracking-wider">Calificación</p>

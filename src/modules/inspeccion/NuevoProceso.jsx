@@ -36,7 +36,7 @@ export default function NuevoProceso({
     const encontrado = csgFiltrados.find(h => String(h.csg) === String(codigoCsg));
     if (encontrado) { 
       setProductorNombre(encontrado.productor || ''); 
-      // Aquí está la magia: buscamos "huerto" y si no está, buscamos "nombre"
+      // Buscamos "huerto" y si no está, buscamos "nombre"
       setHuertoNombre(encontrado.huerto || encontrado.nombre || ''); 
     } else {
       setProductorNombre('');
@@ -72,6 +72,7 @@ export default function NuevoProceso({
       return;
     }
 
+    // Volvemos a los nombres originales para evitar el error "undefined" en InspeccionModule
     onIniciarInspeccion({
       numProceso,
       exportadoraSel,
@@ -134,7 +135,6 @@ export default function NuevoProceso({
             <select required disabled={!exportadoraSel} value={csgSel} onChange={(e) => handleSelectCSG(e.target.value)} className="flex-1 bg-white border border-slate-300 rounded-full px-5 py-3 text-sm text-slate-800 outline-none focus:border-[#E96008] focus:ring-2 focus:ring-orange-100 appearance-none disabled:bg-slate-50 disabled:text-slate-400 cursor-pointer">
               <option value="">{exportadoraSel ? 'Seleccionar...' : 'Selecciona Exportadora'}</option>
               {csgFiltrados.map((i,idx) => (
-                // Aquí también soportamos "i.huerto" e "i.nombre" para mostrarlo bonito en la lista
                 <option key={idx} value={i.csg}>{i.csg} - {i.huerto || i.nombre}</option>
               ))}
             </select>
