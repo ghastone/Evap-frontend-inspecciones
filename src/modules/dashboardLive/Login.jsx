@@ -21,7 +21,6 @@ export default function Login({ onLogin }) {
 
     try {
       // Detección automática y robusta para red local e internet
-      // window.location.hostname obtiene la IP exacta (ej. 192.168.x.x) si estás en la red local
       const hostname = window.location.hostname || 'localhost';
       
       const API_URL = hostname.includes('goldanda.cl')
@@ -209,6 +208,12 @@ export default function Login({ onLogin }) {
         </div>
 
       </div>
+
+      {/* INDICADOR DE VERSIÓN (Esquina inferior derecha) */}
+      <div className="absolute bottom-3 right-4 z-20 text-[10px] text-slate-400/80 font-bold tracking-widest uppercase select-none">
+        beta 1.02
+      </div>
+
     </div>
   );
 }

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Login from './modules/dashboardLive/Login';
 import DashboardLiveView from './modules/dashboardLive/DashboardLiveView';
 import DashboardResumenDiario from './modules/dashboard/DashboardResumenDiario';
-import DashboardHistoricoTemporada from './modules/dashboard/DashboardHistorico'; // Corregido el nombre de importación
+import DashboardHistoricoTemporada from './modules/dashboard/DashboardHistorico';
 
 import NuevoProceso from './modules/inspeccion/NuevoProceso';
 import InspeccionModule from './modules/inspeccion/InspeccionModule';
@@ -25,12 +25,34 @@ export default function App() {
     return savedUser ? JSON.parse(savedUser) : null;
   });
   
-  const [currentView, setCurrentView] = useState('home');
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  // ================= MEMORIA PERSISTENTE DE RUTAS =================
+  // Ahora la App recuerda en qué vista estabas antes de presionar F5
+  const [currentView, setCurrentView] = useState(() => {
+    return localStorage.getItem('qc_current_view') || 'home';
+  });
+
+  const [isCollapsed, setIsCollapsed] = useState(() => {
+    return localStorage.getItem('qc_is_collapsed') === 'true';
+  });
+
+  // Ahora la App recuerda los datos del proceso si se reinicia el navegador
+  const [datosProcesoActivo, setDatosProcesoActivo] = useState(() => {
+    const saved = localStorage.getItem('inspeccionActiva');
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  // Efectos para guardar automáticamente el estado actual
+  useEffect(() => { localStorage.setItem('qc_current_view', currentView); }, [currentView]);
+  useEffect(() => { localStorage.setItem('qc_is_collapsed', isCollapsed); }, [isCollapsed]);
+  useEffect(() => {
+    if (datosProcesoActivo) localStorage.setItem('inspeccionActiva', JSON.stringify(datosProcesoActivo));
+    else localStorage.removeItem('inspeccionActiva');
+  }, [datosProcesoActivo]);
+  // ================================================================
+
   const [showAjustes, setShowAjustes] = useState(false);
   const [dashboardsAbierto, setDashboardsAbierto] = useState(true);
   const [showDrawer, setShowDrawer] = useState(false);
-  const [datosProcesoActivo, setDatosProcesoActivo] = useState(null);
 
   // ================= ESTADOS INACTIVIDAD =================
   const [mostrarAlertaInactividad, setMostrarAlertaInactividad] = useState(false);
@@ -316,13 +338,19 @@ export default function App() {
           <InspeccionModule 
             datosProceso={datosProcesoActivo}
             onAbrirMenu={() => setShowDrawer(true)}
-            onVolver={() => intentarNavegar('home')} 
+            onVolver={() => {
+              setCurrentView('home');
+              setIsCollapsed(false);
+              setDatosProcesoActivo(null);
+            }} 
             onFinishedInspection={(num) => {
               localStorage.removeItem('dashboardLive'); 
               localStorage.removeItem('inspeccionActiva');
               sessionStorage.clear();
               cargarDatosMaestros(); 
-              intentarNavegar('historial'); 
+              
+              setCurrentView('historial');
+              setIsCollapsed(true);
               setDatosProcesoActivo(null);
             }}
           />

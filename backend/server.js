@@ -52,14 +52,14 @@ pool.connect()
         console.log('👤 Usuario "admin" inicial creado con éxito (Clave: admin123).');
       }
 
-      // 🔥 AUTO-MIGRACIÓN: Agregar columnas hora_inicio y hora_fin si no existen
+      // 🔥 AUTO-MIGRACIÓN: Agregar columnas hora_inicio, hora_fin y fecha si no existen
       try {
-        await client.query(`ALTER TABLE procesos ADD COLUMN hora_inicio TIMESTAMP, ADD COLUMN hora_fin TIMESTAMP;`);
-        console.log('✅ Columnas hora_inicio y hora_fin agregadas a la tabla procesos exitosamente.');
+        await client.query(`ALTER TABLE procesos ADD COLUMN hora_inicio TIMESTAMP, ADD COLUMN hora_fin TIMESTAMP, ADD COLUMN fecha DATE;`);
+        console.log('✅ Columnas hora_inicio, hora_fin y fecha agregadas a la tabla procesos exitosamente.');
       } catch (err) {
         // Ignoramos el error si las columnas ya existen (código 42701: duplicate_column)
         if (err.code !== '42701') {
-          console.warn('⚠️ Nota sobre columnas de hora:', err.message);
+          console.warn('⚠️ Nota sobre columnas de hora/fecha:', err.message);
         }
       }
 
@@ -458,8 +458,8 @@ app.post('/api/inspecciones', async (req, res) => {
   try {
     await client.query('BEGIN'); 
     
-    // Capturamos horaInicio y horaFin
-    const { numProceso, exportadora, csg, variedad, estado, cajas, horaInicio, horaFin } = req.body;
+    // 🔥 Capturamos horaInicio, horaFin Y EL NUEVO CAMPO FECHA
+    const { numProceso, exportadora, csg, variedad, estado, cajas, horaInicio, horaFin, fecha } = req.body;
 
     const expRes = await client.query('SELECT id FROM exportadoras WHERE nombre = $1', [exportadora]);
     if (expRes.rows.length === 0) throw new Error(`La exportadora "${exportadora}" no existe.`);
@@ -470,11 +470,11 @@ app.post('/api/inspecciones', async (req, res) => {
     const huertoRes = await client.query('SELECT id FROM huertos WHERE csg = $1', [csg]);
     if (huertoRes.rows.length === 0) throw new Error(`El huerto con CSG "${csg}" no existe.`);
 
-    // Inyectamos hora_inicio y hora_fin
+    // 🔥 Inyectamos hora_inicio, hora_fin y fecha explícita de Chile
     const procRes = await client.query(
-      `INSERT INTO procesos (num_proceso, exportadora_id, huerto_id, variedad_id, estado, hora_inicio, hora_fin) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [numProceso, expRes.rows[0].id, huertoRes.rows[0].id, varRes.rows[0].id, estado || 'Aprobado', horaInicio || null, horaFin || null]
+      `INSERT INTO procesos (num_proceso, exportadora_id, huerto_id, variedad_id, estado, hora_inicio, hora_fin, fecha) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+      [numProceso, expRes.rows[0].id, huertoRes.rows[0].id, varRes.rows[0].id, estado || 'Aprobado', horaInicio || null, horaFin || null, fecha || null]
     );
     const procesoId = procRes.rows[0].id;
 
@@ -521,7 +521,6 @@ app.post('/api/inspecciones', async (req, res) => {
 // ==========================================
 app.get('/api/inspecciones', async (req, res) => {
   try {
-    // Solicitamos también hora_inicio y hora_fin
     const procRes = await pool.query(`
       SELECT 
         p.id, 
@@ -603,7 +602,8 @@ app.put('/api/inspecciones/:id', async (req, res) => {
   try {
     await client.query('BEGIN'); 
     const procesoId = req.params.id;
-    const { numProceso, exportadora, csg, variedad, estado, cajas, horaInicio, horaFin } = req.body; 
+    // 🔥 Capturamos la nueva fecha si viene
+    const { numProceso, exportadora, csg, variedad, estado, cajas, horaInicio, horaFin, fecha } = req.body; 
 
     if (numProceso && exportadora && csg && variedad) {
       const expRes = await client.query('SELECT id FROM exportadoras WHERE nombre = $1', [exportadora]);
@@ -615,13 +615,13 @@ app.put('/api/inspecciones/:id', async (req, res) => {
       const huertoRes = await client.query('SELECT id FROM huertos WHERE csg = $1', [csg]);
       if (huertoRes.rows.length === 0) throw new Error(`El huerto con CSG "${csg}" no existe.`);
 
-      // Actualizamos todo, manteniendo las horas si llegan nulas por alguna razón
+      // 🔥 Actualizamos la fecha si es enviada, si no, se queda la anterior
       await client.query(
         `UPDATE procesos 
          SET num_proceso = $1, exportadora_id = $2, huerto_id = $3, variedad_id = $4, estado = $5,
-             hora_inicio = COALESCE($7, hora_inicio), hora_fin = COALESCE($8, hora_fin)
+             hora_inicio = COALESCE($7, hora_inicio), hora_fin = COALESCE($8, hora_fin), fecha = COALESCE($9, fecha)
          WHERE id = $6`,
-        [numProceso, expRes.rows[0].id, huertoRes.rows[0].id, varRes.rows[0].id, estado || 'Aprobado', procesoId, horaInicio || null, horaFin || null]
+        [numProceso, expRes.rows[0].id, huertoRes.rows[0].id, varRes.rows[0].id, estado || 'Aprobado', procesoId, horaInicio || null, horaFin || null, fecha || null]
       );
     }
 

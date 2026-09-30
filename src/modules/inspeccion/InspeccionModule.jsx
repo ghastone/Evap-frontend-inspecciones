@@ -21,22 +21,41 @@ export default function InspeccionModule({
   onVolver
 }) {
   const { numProceso, exportadoraSel, csgSel, variedadSel, productorNombre, huertoNombre } = datosProceso || {};
+  const DRAFT_KEY = `draft_inspeccion_${numProceso}`;
+
+  // ==========================================
+  // INICIALIZACIÓN PEREZOSA (LAZY INIT)
+  // Lee el disco duro ANTES de que el componente nazca
+  // ==========================================
+  const getDraft = () => {
+    if (!numProceso) return null;
+    try {
+      const saved = localStorage.getItem(DRAFT_KEY);
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const draftInit = getDraft();
+
+  // Estados inicializados directamente con el borrador si existe
+  const [cajas, setCajas] = useState(draftInit?.cajas || []);
+  const [cajaActual, setCajaActual] = useState(draftInit?.cajaActual || {
+    numCaja: 1, frutos: '100', calibre: '', brix: '', color: '',
+    defCalidad: { ...defectosCalidadBase }, defCondicion: { ...defectosCondicionBase }
+  });
+  const [horaInicio, setHoraInicio] = useState(draftInit?.horaInicio || null);
 
   const [tabDefectos, setTabDefectos] = useState('calidad'); 
   const [showModalFinalizar, setShowModalFinalizar] = useState(false);
   const [showModalCancelar, setShowModalCancelar] = useState(false);
+  const [showModalExitoGuardado, setShowModalExitoGuardado] = useState(false);
   const [mensajeExito, setMensajeExito] = useState('');
   const [haVistoCondicion, setHaVistoCondicion] = useState(false);
 
-  // === ESTADO: HORA DE INICIO EXACTA ===
-  const [horaInicio, setHoraInicio] = useState(null);
-
-  // ESTADOS PRINCIPALES DE LOS DATOS
-  const [cajas, setCajas] = useState([]);
-  const [cajaActual, setCajaActual] = useState({
-    numCaja: 1, frutos: '100', calibre: '', brix: '', color: '',
-    defCalidad: { ...defectosCalidadBase }, defCondicion: { ...defectosCondicionBase }
-  });
+  const [paramsCalidad, setParamsCalidad] = useState([]);
+  const [paramsCondicion, setParamsCondicion] = useState([]);
 
   const [cajaEnEdicion, setCajaEnEdicion] = useState(null);
   const [cajaIndexEdicion, setCajaIndexEdicion] = useState(null);
@@ -49,48 +68,36 @@ export default function InspeccionModule({
     ? 'https://evap.maq.goldanda.cl' 
     : `http://${window.location.hostname || 'localhost'}:3001`;
 
-  // ==========================================
-  // LÓGICA DE AUTOGUARDADO (LOCALSTORAGE)
-  // ==========================================
-  const DRAFT_KEY = `draft_inspeccion_${numProceso}`;
-
-  // 1. Cargar borrador al montar el componente (Si existe)
+  // Aviso de borrador restaurado (Solo visual, se ejecuta 1 vez al montar)
   useEffect(() => {
-    if (!numProceso) return;
-    try {
-      const savedDraft = localStorage.getItem(DRAFT_KEY);
-      if (savedDraft) {
-        const parsed = JSON.parse(savedDraft);
-        setCajas(parsed.cajas || []);
-        if (parsed.cajaActual) setCajaActual(parsed.cajaActual);
-        
-        // Restaurar hora de inicio si estaba en el borrador
-        if (parsed.horaInicio) {
-          setHoraInicio(parsed.horaInicio);
-        }
-
-        setMensajeExito('Borrador restaurado correctamente');
-        setTimeout(() => setMensajeExito(''), 3000);
-      }
-    } catch (e) {
-      console.warn("Error leyendo borrador local", e);
+    if (draftInit && draftInit.cajas && draftInit.cajas.length > 0) {
+      setMensajeExito('Borrador restaurado (F5)');
+      setTimeout(() => setMensajeExito(''), 3000);
     }
-  }, [numProceso, DRAFT_KEY]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 2. Guardar borrador automáticamente ante CUALQUIER cambio
+  // Autoguardado ininterrumpido en cada cambio
   useEffect(() => {
     if (!numProceso) return;
     const draft = { cajas, cajaActual, horaInicio };
     localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
   }, [cajas, cajaActual, horaInicio, numProceso, DRAFT_KEY]);
 
-  // Función para limpiar el borrador
   const limpiarBorrador = () => {
     localStorage.removeItem(DRAFT_KEY);
   };
-  // ==========================================
 
-  // Envío de datos al Dashboard en vivo (Broadcast)
+  useEffect(() => {
+    fetch(`${API_URL}/api/parametros`)
+      .then(r => r.json())
+      .then(data => {
+        setParamsCalidad(data.calidad || []);
+        setParamsCondicion(data.condicion || []);
+      })
+      .catch(err => console.error("Error obteniendo parámetros:", err));
+  }, [API_URL]);
+
+  // Envío de datos al Dashboard en vivo
   useEffect(() => {
     const payload = {
       numProceso, exportadora: exportadoraSel, productor: productorNombre, huerto: huertoNombre, variedad: variedadSel, csg: csgSel,
@@ -98,21 +105,14 @@ export default function InspeccionModule({
       horaInicio 
     };
     fetch(`${API_URL}/api/live`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
     }).catch(err => console.log('Error enviando datos en vivo:', err));
   }, [cajas, cajaActual, headerCompleto, numProceso, exportadoraSel, productorNombre, huertoNombre, variedadSel, csgSel, horaInicio, API_URL]);
 
-  // === FUNCIÓN CLAVE: ARRANCA EL RELOJ EN EL PRIMER CLICK/CAMBIO ===
-  const registrarInicioProceso = () => {
-    if (!horaInicio) {
-      setHoraInicio(new Date().toISOString());
-    }
-  };
+  const registrarInicioProceso = () => { if (!horaInicio) setHoraInicio(new Date().toISOString()); };
 
   const actualizarDefecto = (tipo, def, valor) => {
-    registrarInicioProceso(); // Arranca el reloj si anotan un defecto
+    registrarInicioProceso();
     const val = valor === '' ? '' : Math.max(0, parseInt(valor) || 0);
     setCajaActual(prev => ({ 
       ...prev, [tipo === 'calidad' ? 'defCalidad' : 'defCondicion']: { ...prev[tipo === 'calidad' ? 'defCalidad' : 'defCondicion'], [def]: val } 
@@ -122,10 +122,7 @@ export default function InspeccionModule({
   const calcularPctGlobalDefecto = (tipoStr, def) => {
     let tFrutos = parseInt(cajaActual.frutos) || 0;
     let tDefecto = parseInt(cajaActual[tipoStr][def]) || 0;
-    cajas.forEach(c => {
-      tFrutos += parseInt(c.frutos) || 0;
-      tDefecto += parseInt(c[tipoStr][def]) || 0;
-    });
+    cajas.forEach(c => { tFrutos += parseInt(c.frutos) || 0; tDefecto += parseInt(c[tipoStr][def]) || 0; });
     return tFrutos === 0 ? '0.0' : ((tDefecto / tFrutos) * 100).toFixed(1);
   };
 
@@ -139,106 +136,60 @@ export default function InspeccionModule({
   };
 
   const manejarCambioBrix = (e, esEdicion = false) => {
-    if (!esEdicion) registrarInicioProceso(); // Arranca el reloj
-    let val = e.target.value.replace(',', '.');
-    val = val.replace(/[^0-9.]/g, ''); 
+    if (!esEdicion) registrarInicioProceso();
+    let val = e.target.value.replace(',', '.'); val = val.replace(/[^0-9.]/g, ''); 
     if ((val.match(/\./g) || []).length > 1) return; 
-
-    if (esEdicion) {
-      setCajaEnEdicion(prev => ({ ...prev, brix: val }));
-    } else {
-      setCajaActual(prev => ({ ...prev, brix: val }));
-    }
+    if (esEdicion) setCajaEnEdicion(prev => ({ ...prev, brix: val }));
+    else setCajaActual(prev => ({ ...prev, brix: val }));
   };
 
   const guardarCaja = () => {
     if (!headerCompleto) return alert("Completa Muestra, Calibre, Color de embalaje y °Brix.");
-
     const brixVal = parseFloat(cajaActual.brix);
-    if (!isNaN(brixVal) && brixVal > 30) {
-      if (!window.confirm(`El valor de °Brix ingresado (${brixVal}) es superior a 30. ¿Estás seguro de que el valor es correcto?`)) {
-        return;
-      }
-    }
-
-    registrarInicioProceso(); // Por seguridad, si de alguna forma mágica guardan sin escribir nada
+    if (!isNaN(brixVal) && brixVal > 30) { if (!window.confirm(`El valor de °Brix ingresado (${brixVal}) es superior a 30. ¿Estás seguro?`)) return; }
+    registrarInicioProceso();
     setCajas([...cajas, { ...cajaActual, id: Date.now() }]);
-    setCajaActual({ 
-      numCaja: cajas.length + 2, frutos: '100', calibre: '', brix: '', color: '', 
-      defCalidad: { ...defectosCalidadBase }, defCondicion: { ...defectosCondicionBase } 
-    });
-    
-    setHaVistoCondicion(false);
-    setTabDefectos('calidad');
-    
-    setMensajeExito('Caja guardada correctamente');
-    setTimeout(() => { setMensajeExito(''); }, 2500);
+    setCajaActual({ numCaja: cajas.length + 2, frutos: '100', calibre: '', brix: '', color: '', defCalidad: { ...defectosCalidadBase }, defCondicion: { ...defectosCondicionBase } });
+    setHaVistoCondicion(false); setTabDefectos('calidad');
+    setMensajeExito('Caja guardada correctamente'); setTimeout(() => { setMensajeExito(''); }, 2500);
   };
 
-  const abrirModalEdicionCaja = (caja, index) => {
-    setCajaEnEdicion(JSON.parse(JSON.stringify(caja)));
-    setCajaIndexEdicion(index);
-    setTabDefectosEdicion('calidad');
-  };
-
-  const handleEdicionCampo = (campo, valor) => {
-    setCajaEnEdicion(prev => ({ ...prev, [campo]: valor }));
-  };
-
-  const handleEdicionDefecto = (tipoDef, def, valor) => {
-    const val = valor === '' ? '' : Math.max(0, parseInt(valor) || 0);
-    setCajaEnEdicion(prev => ({
-      ...prev, [tipoDef]: { ...prev[tipoDef], [def]: val }
-    }));
-  };
+  const abrirModalEdicionCaja = (caja, index) => { setCajaEnEdicion(JSON.parse(JSON.stringify(caja))); setCajaIndexEdicion(index); setTabDefectosEdicion('calidad'); };
+  const handleEdicionCampo = (campo, valor) => setCajaEnEdicion(prev => ({ ...prev, [campo]: valor }));
+  const handleEdicionDefecto = (tipoDef, def, valor) => { const val = valor === '' ? '' : Math.max(0, parseInt(valor) || 0); setCajaEnEdicion(prev => ({ ...prev, [tipoDef]: { ...prev[tipoDef], [def]: val } })); };
 
   const guardarCambiosCajaEditada = () => {
     const brixVal = parseFloat(cajaEnEdicion.brix);
-    if (!isNaN(brixVal) && brixVal > 30) {
-      if (!window.confirm(`El valor de °Brix ingresado (${brixVal}) es superior a 30. ¿Estás seguro de que el valor es correcto?`)) {
-        return;
-      }
-    }
-
-    const nuevasCajas = [...cajas];
-    nuevasCajas[cajaIndexEdicion] = cajaEnEdicion;
-    setCajas(nuevasCajas);
-    setCajaEnEdicion(null);
-    setCajaIndexEdicion(null);
-    setMensajeExito('Caja actualizada correctamente');
-    setTimeout(() => { setMensajeExito(''); }, 2500);
+    if (!isNaN(brixVal) && brixVal > 30) { if (!window.confirm(`El valor de °Brix (${brixVal}) es mayor a 30. ¿Es correcto?`)) return; }
+    const nuevasCajas = [...cajas]; nuevasCajas[cajaIndexEdicion] = cajaEnEdicion;
+    setCajas(nuevasCajas); setCajaEnEdicion(null); setCajaIndexEdicion(null);
+    setMensajeExito('Caja actualizada correctamente'); setTimeout(() => setMensajeExito(''), 2500);
   };
 
   const eliminarCajaGuardada = (index) => {
     if (window.confirm(`¿Seguro que deseas eliminar la Caja #${cajas[index]?.numCaja}?`)) {
       const filtradas = cajas.filter((_, i) => i !== index);
       const reindexadas = filtradas.map((c, i) => ({ ...c, numCaja: i + 1 }));
-      setCajas(reindexadas);
-      setCajaActual(prev => ({ ...prev, numCaja: reindexadas.length + 1 }));
-      setCajaEnEdicion(null);
-      setCajaIndexEdicion(null);
+      setCajas(reindexadas); setCajaActual(prev => ({ ...prev, numCaja: reindexadas.length + 1 }));
+      setCajaEnEdicion(null); setCajaIndexEdicion(null);
     }
   };
 
   const confirmarCancelarProceso = async () => {
-    try {
-      await fetch(`${API_URL}/api/live`, { 
-        method: 'POST', 
-        headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify({}) 
-      });
-    } catch (err) {
-      console.log('Error limpiando live process:', err);
-    }
-    limpiarBorrador(); 
-    setShowModalCancelar(false);
-    if (onVolver) onVolver();
+    try { await fetch(`${API_URL}/api/live`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }); } catch (err) {}
+    limpiarBorrador(); setShowModalCancelar(false); if (onVolver) onVolver();
   };
 
   let acumuladoFrutos = parseInt(cajaActual.frutos) || 0;
-  let acumuladoCal = Object.values(cajaActual.defCalidad).reduce((a, b) => a + (parseInt(b) || 0), 0);
-  let acumuladoCond = Object.values(cajaActual.defCondicion).reduce((a, b) => a + (parseInt(b) || 0), 0);
+  let acumuladoCal = 0;
+  let acumuladoCond = 0;
   let sumBrixLight = 0, countBrixLight = 0, sumBrixDark = 0, countBrixDark = 0;
+
+  let defCalidadMap = { ...cajaActual.defCalidad };
+  let defCondicionMap = { ...cajaActual.defCondicion };
+
+  Object.values(cajaActual.defCalidad).forEach(v => acumuladoCal += (parseInt(v) || 0));
+  Object.values(cajaActual.defCondicion).forEach(v => acumuladoCond += (parseInt(v) || 0));
 
   if (cajaActual.brix && parseFloat(cajaActual.brix) > 0) {
     if (cajaActual.color === 'Light') { sumBrixLight += parseFloat(cajaActual.brix); countBrixLight++; }
@@ -246,65 +197,110 @@ export default function InspeccionModule({
   }
 
   cajas.forEach(c => {
-    const f = parseInt(c.frutos) || 0;
+    const f = parseInt(c.frutos) || 0; 
     acumuladoFrutos += f;
+    
     if (c.brix && parseFloat(c.brix) > 0) {
       if (c.color === 'Light') { sumBrixLight += parseFloat(c.brix); countBrixLight++; }
       if (c.color === 'Dark') { sumBrixDark += parseFloat(c.brix); countBrixDark++; }
     }
-    Object.values(c.defCalidad || {}).forEach(v => acumuladoCal += (parseInt(v) || 0));
-    Object.values(c.defCondicion || {}).forEach(v => acumuladoCond += (parseInt(v) || 0));
+    Object.entries(c.defCalidad || {}).forEach(([k, v]) => {
+      const val = parseInt(v) || 0;
+      acumuladoCal += val;
+      defCalidadMap[k] = (defCalidadMap[k] || 0) + val;
+    });
+    Object.entries(c.defCondicion || {}).forEach(([k, v]) => {
+      const val = parseInt(v) || 0;
+      acumuladoCond += val;
+      defCondicionMap[k] = (defCondicionMap[k] || 0) + val;
+    });
   });
 
   const pCalGlobal = acumuladoFrutos ? (acumuladoCal / acumuladoFrutos) * 100 : 0;
   const pCondGlobal = acumuladoFrutos ? (acumuladoCond / acumuladoFrutos) * 100 : 0;
   const pExpGlobal = acumuladoFrutos ? Math.max(0, 100 - pCalGlobal - pCondGlobal) : 100;
-  const califLetter = pCalGlobal <= 5 ? 'A' : pCalGlobal <= 10 ? 'B' : 'C';
-  const califNum = pCondGlobal <= 5 ? '1' : pCondGlobal <= 10 ? '2' : '3';
-  const notaGlobal = acumuladoFrutos ? `${califLetter}${califNum}` : '-';
-  const estadoGlobal = acumuladoFrutos ? ((califLetter === 'C' || califNum === '3') ? 'Objetado' : 'Aprobado') : '-';
+  
+  let letCal = 'A';
+  let numCond = '1';
+
+  if (acumuladoFrutos > 0) {
+    const sumCalP = paramsCalidad.find(p => p.nombre === 'Sumatoria de calidad') || { limAB: 15, limBC: 20 };
+    if (pCalGlobal > (Number(sumCalP.limBC) || 20)) letCal = 'C';
+    else if (pCalGlobal > (Number(sumCalP.limAB) || 15) && letCal === 'A') letCal = 'B';
+
+    Object.entries(defCalidadMap).forEach(([def, val]) => {
+      const pct = (val / acumuladoFrutos) * 100;
+      const p = paramsCalidad.find(x => x.nombre === def);
+      if (p) {
+        if (pct > (Number(p.limBC) || 999)) letCal = 'C';
+        else if (pct > (Number(p.limAB) || 999) && letCal === 'A') letCal = 'B';
+      }
+    });
+
+    const sumCondP = paramsCondicion.find(p => p.nombre === 'Sumatoria de condición') || { lim12: 10, lim23: 15 };
+    if (pCondGlobal > (Number(sumCondP.lim23) || 15)) numCond = '3';
+    else if (pCondGlobal > (Number(sumCondP.lim12) || 10) && numCond === '1') numCond = '2';
+
+    Object.entries(defCondicionMap).forEach(([def, val]) => {
+      const pct = (val / acumuladoFrutos) * 100;
+      const p = paramsCondicion.find(x => x.nombre === def);
+      if (p) {
+        if (pct > (Number(p.lim23) || 999)) numCond = '3';
+        else if (pct > (Number(p.lim12) || 999) && numCond === '1') numCond = '2';
+      }
+    });
+  }
+
+  const notaGlobal = acumuladoFrutos > 0 ? `${letCal}${numCond}` : '-';
+  const esCritico = letCal === 'C' || numCond === '3';
+  const esAlerta = (!esCritico) && (letCal === 'B' || numCond === '2');
+  const estadoGlobal = acumuladoFrutos ? (esCritico ? 'Objetado' : 'Aprobado') : '-';
+  const colorNota = esCritico ? 'bg-red-600 border-red-700 text-white' : esAlerta ? 'bg-amber-500 border-amber-600 text-white' : 'bg-[#00A859] border-green-700 text-white';
+
   const promLight = countBrixLight ? (sumBrixLight / countBrixLight).toFixed(1).replace('.', ',') : '0,0';
   const promDark = countBrixDark ? (sumBrixDark / countBrixDark).toFixed(1).replace('.', ',') : '0,0';
   const totalCajasBanner = cajas.length + ((parseInt(cajaActual.frutos) || 0) > 0 ? 1 : 0);
   const totalDefCalidadActual = Object.values(cajaActual.defCalidad).reduce((a, b) => a + (parseInt(b) || 0), 0);
   const totalDefCondicionActual = Object.values(cajaActual.defCondicion).reduce((a, b) => a + (parseInt(b) || 0), 0);
 
-  const enviarInspeccionAlServidor = async () => {
+ const enviarInspeccionAlServidor = async () => {
     let cajasFinales = headerCompleto ? [...cajas, cajaActual] : [...cajas];
     if (cajasFinales.length === 0) return alert("No has evaluado ninguna caja.");
-
-    // === AQUÍ SE SELLA LA HORA DE FIN JUSTO AL HACER CLICK EN GUARDAR ===
+    
     const horaFinCalculada = new Date().toISOString();
+
+    // Extraemos la fecha exacta en Chile al momento de presionar "Guardar" (Formato YYYY-MM-DD)
+    const fechaExactaChile = new Intl.DateTimeFormat('en-CA', { 
+      timeZone: 'America/Santiago', 
+      year: 'numeric', month: '2-digit', day: '2-digit' 
+    }).format(new Date());
 
     try {
       const payload = { 
-        numProceso, 
-        exportadora: exportadoraSel, 
-        csg: csgSel, 
-        variedad: variedadSel, 
-        estado: estadoGlobal, 
-        cajas: cajasFinales,
-        productor: productorNombre,
-        huerto: huertoNombre,
-        horaInicio: horaInicio,    // Se envía el momento del primer click
-        horaFin: horaFinCalculada  // Se envía el momento de este click
+        numProceso, exportadora: exportadoraSel, csg: csgSel, variedad: variedadSel, 
+        estado: notaGlobal, 
+        cajas: cajasFinales, productor: productorNombre, huerto: huertoNombre,
+        horaInicio, horaFin: horaFinCalculada,
+        fecha: fechaExactaChile // <--- ENVIAMOS LA FECHA EXPLÍCITA AQUÍ
       };
       
-      const response = await fetch(`${API_URL}/api/inspecciones`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      const response = await fetch(`${API_URL}/api/inspecciones`, { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify(payload) 
       });
-      const data = await response.json(); 
+      
       if (response.ok) {
-        await fetch(`${API_URL}/api/live`, { 
-          method: 'POST', 
-          headers: { 'Content-Type': 'application/json' }, 
-          body: JSON.stringify({}) 
-        });
+        await fetch(`${API_URL}/api/live`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
         limpiarBorrador(); 
-        alert("¡Proceso guardado exitosamente!");
-        if (onFinishedInspection) onFinishedInspection(parseInt(numProceso, 10));
-      } else { alert("❌ ERROR DEL SERVIDOR: " + (data.error || "Error al guardar")); }
-    } catch (err) { alert("❌ ERROR DE CONEXIÓN: No se pudo contactar al servidor Backend."); }
+        setShowModalExitoGuardado(true);
+      } else { 
+        const data = await response.json(); 
+        alert("❌ ERROR DEL SERVIDOR: " + (data.error || "Error al guardar")); 
+      }
+    } catch (err) { 
+      alert("❌ ERROR DE CONEXIÓN: No se pudo contactar al servidor Backend."); 
+    }
   };
 
   const rend = totalesCaja();
@@ -330,12 +326,10 @@ export default function InspeccionModule({
             )}
             <div>
               <h1 className="text-[19px] md:text-2xl font-black text-[#0F172A] leading-tight">Inspección producto<br className="md:hidden"/> terminado</h1>
-              
               <div className="flex flex-wrap items-center gap-2 mt-1">
                 <p className="text-sm md:text-sm text-slate-500 font-semibold uppercase">
                   {huertoNombre || productorNombre || 'Ingreso en vivo'} - {variedadSel}
                 </p>
-                {/* === CÁPSULA VISUAL DEL TIEMPO === */}
                 {horaInicio ? (
                   <span className="text-[#E96008] font-black bg-orange-50 px-2 py-0.5 rounded-md border border-orange-100 whitespace-nowrap text-xs shadow-sm">
                     INICIO: {new Date(horaInicio).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -346,7 +340,6 @@ export default function InspeccionModule({
                   </span>
                 )}
               </div>
-
             </div>
           </div>
           <img src="/Logo_goldanda.png" alt="Logo" className="h-7 md:h-10 object-contain hidden sm:block" />
@@ -390,7 +383,7 @@ export default function InspeccionModule({
             </div>
             <div className="flex flex-col justify-center items-start pl-1">
               <span className="text-[11px] font-medium opacity-80 mb-0.5">Estado</span>
-              <span className={`inline-block px-2.5 py-0.5 md:py-1 rounded-full text-[10px] md:text-xs font-bold text-white shadow-inner ${estadoGlobal === 'Objetado' ? 'bg-red-600/80' : 'bg-white/25 border border-white/30'}`}>
+              <span className={`inline-block px-2.5 py-0.5 md:py-1 rounded-full text-[10px] md:text-xs font-bold shadow-sm border ${colorNota}`}>
                 {estadoGlobal}
               </span>
             </div>
@@ -445,14 +438,8 @@ export default function InspeccionModule({
             <div className="bg-slate-50 p-2 md:p-3 rounded-xl border border-slate-200/80 flex items-center justify-between">
               <span className="text-xs font-bold text-slate-700">Muestra (frutos):</span>
               <input 
-                type="number" 
-                inputMode="numeric" 
-                onWheel={(e) => e.target.blur()} 
-                value={cajaActual.frutos} 
-                onChange={(e) => {
-                  registrarInicioProceso();
-                  setCajaActual({ ...cajaActual, frutos: e.target.value });
-                }} 
+                type="number" inputMode="numeric" onWheel={(e) => e.target.blur()} value={cajaActual.frutos} 
+                onChange={(e) => { registrarInicioProceso(); setCajaActual({ ...cajaActual, frutos: e.target.value }); }} 
                 className={`w-24 md:w-28 text-center font-bold text-base md:text-lg bg-white border border-slate-300 rounded-lg md:rounded-xl h-8 md:h-10 outline-none focus:border-[#E96008] ${hideSpinners}`} 
               />
             </div>
@@ -460,10 +447,7 @@ export default function InspeccionModule({
               <span className="text-xs font-bold text-slate-700">Calibre:</span>
               <select 
                 value={cajaActual.calibre} 
-                onChange={(e) => {
-                  registrarInicioProceso();
-                  setCajaActual({ ...cajaActual, calibre: e.target.value });
-                }} 
+                onChange={(e) => { registrarInicioProceso(); setCajaActual({ ...cajaActual, calibre: e.target.value }); }} 
                 className="w-24 md:w-28 text-center font-bold text-xs md:text-sm bg-white border border-slate-300 rounded-lg md:rounded-xl h-8 md:h-10 outline-none focus:border-[#E96008]"
               >
                 <option value="">Seleccionar</option>
@@ -475,10 +459,7 @@ export default function InspeccionModule({
               <span className="text-xs font-bold text-slate-700">Color embalaje:</span>
               <select 
                 value={cajaActual.color} 
-                onChange={(e) => {
-                  registrarInicioProceso();
-                  setCajaActual({ ...cajaActual, color: e.target.value });
-                }} 
+                onChange={(e) => { registrarInicioProceso(); setCajaActual({ ...cajaActual, color: e.target.value }); }} 
                 className="w-24 md:w-28 text-center font-bold text-xs md:text-sm bg-white border border-slate-300 rounded-lg md:rounded-xl h-8 md:h-10 outline-none focus:border-[#E96008]"
               >
                 <option value="">Seleccionar</option>
@@ -488,10 +469,7 @@ export default function InspeccionModule({
             <div className="bg-slate-50 p-2 md:p-3 rounded-xl border border-slate-200/80 flex items-center justify-between">
               <span className="text-xs font-bold text-slate-700">° Brix:</span>
               <input 
-                type="text" 
-                inputMode="decimal"
-                value={cajaActual.brix} 
-                onChange={(e) => manejarCambioBrix(e, false)} 
+                type="text" inputMode="decimal" value={cajaActual.brix} onChange={(e) => manejarCambioBrix(e, false)} 
                 className={`w-24 md:w-28 text-center font-bold text-base md:text-lg bg-white border border-slate-300 rounded-lg md:rounded-xl h-8 md:h-10 outline-none focus:border-[#E96008]`} 
               />
             </div>
@@ -509,11 +487,7 @@ export default function InspeccionModule({
               {totalDefCalidadActual > 0 && <span className="bg-[#E96008] text-white text-[10px] md:text-xs px-1.5 md:px-2 py-0.5 rounded-full font-bold">{totalDefCalidadActual}</span>}
             </button>
             <button 
-              onClick={() => { 
-                registrarInicioProceso();
-                setTabDefectos('condicion'); 
-                setHaVistoCondicion(true); 
-              }} 
+              onClick={() => { registrarInicioProceso(); setTabDefectos('condicion'); setHaVistoCondicion(true); }} 
               className={`flex-1 py-2 md:py-3 px-2 md:px-4 font-extrabold text-[13px] md:text-base border-b-2 transition-all flex items-center justify-center gap-2 ${tabDefectos === 'condicion' ? 'border-red-600 text-red-600 bg-red-50/50 rounded-t-xl' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
             >
               Defectos de Condición
@@ -564,31 +538,9 @@ export default function InspeccionModule({
 
         {/* BOTONES DE ACCIÓN */}
         <div className="pt-2 pb-6 md:pb-12 flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 w-full">
-          <button 
-            onClick={() => setShowModalCancelar(true)} 
-            disabled={cajaEnEdicion !== null}
-            className="py-3 md:py-3.5 px-4 bg-slate-600 hover:bg-slate-700 disabled:bg-slate-400 text-white font-extrabold rounded-xl text-xs md:text-base shadow-md transition-all active:scale-[0.98] flex items-center justify-center gap-2"
-          >
-            <ArrowLeft className="w-4 h-4" /> Cancelar
-          </button>
-
-          <button 
-            onClick={guardarCaja} 
-            disabled={!headerCompleto || cajaEnEdicion !== null || !haVistoCondicion}
-            className="py-3 md:py-3.5 px-6 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white font-extrabold rounded-xl text-xs md:text-base shadow-md transition-all active:scale-[0.98]"
-          >
-            {(!haVistoCondicion && headerCompleto && cajaEnEdicion === null) 
-              ? 'Revisa Condición para Guardar' 
-              : 'Guardar y Siguiente'}
-          </button>
-
-          <button 
-            onClick={() => setShowModalFinalizar(true)} 
-            disabled={cajaEnEdicion !== null}
-            className="py-3 md:py-3.5 px-6 bg-[#00A859] hover:bg-[#008f4c] disabled:bg-slate-400 text-white font-extrabold rounded-xl text-xs md:text-base shadow-md transition-all flex items-center justify-center gap-2 shrink-0 active:scale-[0.98]"
-          >
-            <Check className="w-4 h-4 md:w-5 md:h-5" /> Finalizar Proceso
-          </button>
+          <button onClick={() => setShowModalCancelar(true)} disabled={cajaEnEdicion !== null} className="py-3 md:py-3.5 px-4 bg-slate-600 hover:bg-slate-700 disabled:bg-slate-400 text-white font-extrabold rounded-xl text-xs md:text-base shadow-md transition-all flex items-center justify-center gap-2"><ArrowLeft className="w-4 h-4" /> Cancelar</button>
+          <button onClick={guardarCaja} disabled={!headerCompleto || cajaEnEdicion !== null || !haVistoCondicion} className="py-3 md:py-3.5 px-6 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white font-extrabold rounded-xl text-xs md:text-base shadow-md transition-all">{(!haVistoCondicion && headerCompleto && cajaEnEdicion === null) ? 'Revisa Condición para Guardar' : 'Guardar y Siguiente'}</button>
+          <button onClick={() => setShowModalFinalizar(true)} disabled={cajaEnEdicion !== null} className="py-3 md:py-3.5 px-6 bg-[#00A859] hover:bg-[#008f4c] disabled:bg-slate-400 text-white font-extrabold rounded-xl text-xs md:text-base shadow-md transition-all flex items-center justify-center gap-2 shrink-0"><Check className="w-4 h-4 md:w-5 md:h-5" /> Finalizar Proceso</button>
         </div>
 
       </div>
@@ -598,150 +550,98 @@ export default function InspeccionModule({
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto p-5 md:p-8 flex flex-col gap-4 border border-slate-100 relative custom-scrollbar">
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-              <div>
-                <h3 className="font-black text-slate-900 text-base md:text-xl">
-                  Corrigiendo Caja #{cajaEnEdicion.numCaja}
-                </h3>
-              </div>
-              <button onClick={() => setCajaEnEdicion(null)} className="p-1.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors">
-                <X className="w-5 h-5" />
-              </button>
+              <h3 className="font-black text-slate-900 text-base md:text-xl">Corrigiendo Caja #{cajaEnEdicion.numCaja}</h3>
+              <button onClick={() => setCajaEnEdicion(null)} className="p-1.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"><X className="w-5 h-5" /></button>
             </div>
-
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-200/80">
-              <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Muestra (frutos)</label>
-                <input type="number" value={cajaEnEdicion.frutos ?? ''} onChange={(e) => handleEdicionCampo('frutos', e.target.value)} className="w-full h-9 text-center font-bold text-sm bg-white border border-slate-300 rounded-xl outline-none focus:border-[#E96008]" />
-              </div>
+              <div><label className="text-xs font-bold text-slate-700 block mb-1">Muestra</label><input type="number" value={cajaEnEdicion.frutos ?? ''} onChange={(e) => handleEdicionCampo('frutos', e.target.value)} className="w-full h-9 text-center font-bold text-sm bg-white border border-slate-300 rounded-xl outline-none focus:border-[#E96008]" /></div>
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1">Calibre</label>
-                <select value={cajaEnEdicion.calibre ?? ''} onChange={(e) => handleEdicionCampo('calibre', e.target.value)} className="w-full h-9 text-center font-bold text-xs bg-white border border-slate-300 rounded-xl outline-none focus:border-[#E96008]">
-                  <option value="">Seleccionar</option>
-                  <option value="L">L</option><option value="XL">XL</option><option value="J">J</option>
-                  <option value="2J">2J</option><option value="3J">3J</option><option value="4J">4J</option><option value="5J">5J</option>
-                </select>
+                <select value={cajaEnEdicion.calibre ?? ''} onChange={(e) => handleEdicionCampo('calibre', e.target.value)} className="w-full h-9 text-center font-bold text-xs bg-white border border-slate-300 rounded-xl outline-none focus:border-[#E96008]"><option value="">Seleccionar</option><option value="L">L</option><option value="XL">XL</option><option value="J">J</option><option value="2J">2J</option><option value="3J">3J</option><option value="4J">4J</option><option value="5J">5J</option></select>
               </div>
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1">Color</label>
-                <select value={cajaEnEdicion.color ?? ''} onChange={(e) => handleEdicionCampo('color', e.target.value)} className="w-full h-9 text-center font-bold text-xs bg-white border border-slate-300 rounded-xl outline-none focus:border-[#E96008]">
-                  <option value="">Seleccionar</option>
-                  <option value="Light">Light</option><option value="Dark">Dark</option>
-                </select>
+                <select value={cajaEnEdicion.color ?? ''} onChange={(e) => handleEdicionCampo('color', e.target.value)} className="w-full h-9 text-center font-bold text-xs bg-white border border-slate-300 rounded-xl outline-none focus:border-[#E96008]"><option value="">Seleccionar</option><option value="Light">Light</option><option value="Dark">Dark</option></select>
               </div>
-              <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">° Brix</label>
-                <input 
-                  type="text" 
-                  inputMode="decimal"
-                  value={cajaEnEdicion.brix ?? ''} 
-                  onChange={(e) => manejarCambioBrix(e, true)} 
-                  className="w-full h-9 text-center font-bold text-sm bg-white border border-slate-300 rounded-xl outline-none focus:border-[#E96008]" 
-                />
-              </div>
+              <div><label className="text-xs font-bold text-slate-700 block mb-1">° Brix</label><input type="text" inputMode="decimal" value={cajaEnEdicion.brix ?? ''} onChange={(e) => manejarCambioBrix(e, true)} className="w-full h-9 text-center font-bold text-sm bg-white border border-slate-300 rounded-xl outline-none focus:border-[#E96008]" /></div>
             </div>
-
             <div className="flex border-b border-slate-200">
-              <button type="button" onClick={() => setTabDefectosEdicion('calidad')} className={`flex-1 py-2.5 font-extrabold text-[13px] md:text-sm border-b-2 transition-all ${tabDefectosEdicion === 'calidad' ? 'border-[#E96008] text-[#E96008] bg-orange-50/50 rounded-t-xl' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>Defectos de Calidad</button>
-              <button type="button" onClick={() => setTabDefectosEdicion('condicion')} className={`flex-1 py-2.5 font-extrabold text-[13px] md:text-sm border-b-2 transition-all ${tabDefectosEdicion === 'condicion' ? 'border-red-600 text-red-600 bg-red-50/50 rounded-t-xl' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>Defectos de Condición</button>
+              <button type="button" onClick={() => setTabDefectosEdicion('calidad')} className={`flex-1 py-2.5 font-extrabold text-[13px] md:text-sm border-b-2 transition-all ${tabDefectosEdicion === 'calidad' ? 'border-[#E96008] text-[#E96008] bg-orange-50/50' : 'border-transparent text-slate-500'}`}>Calidad</button>
+              <button type="button" onClick={() => setTabDefectosEdicion('condicion')} className={`flex-1 py-2.5 font-extrabold text-[13px] md:text-sm border-b-2 transition-all ${tabDefectosEdicion === 'condicion' ? 'border-red-600 text-red-600 bg-red-50/50' : 'border-transparent text-slate-500'}`}>Condición</button>
             </div>
-
             {tabDefectosEdicion === 'calidad' && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-2 max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">
-                {Object.keys(defectosCalidadBase).map(def => {
-                  const cant = cajaEnEdicion.defCalidad?.[def] ?? 0;
-                  return (
-                    <div key={def} className="flex items-center justify-between p-1 border-b border-slate-100">
-                      <span className="text-[13px] md:text-sm font-medium text-slate-700 truncate flex-1">{def}</span>
-                      <input type="number" value={cant === 0 ? '' : cant} onChange={(e) => handleEdicionDefecto('defCalidad', def, e.target.value)} className="w-14 h-8 border border-slate-300 rounded-lg text-center font-bold text-sm bg-white outline-none focus:border-[#E96008]" />
-                    </div>
-                  );
-                })}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-2 max-h-[250px] overflow-y-auto custom-scrollbar">
+                {Object.keys(defectosCalidadBase).map(def => <div key={def} className="flex justify-between p-1 border-b border-slate-100"><span className="text-[13px] md:text-sm font-medium">{def}</span><input type="number" value={cajaEnEdicion.defCalidad?.[def] || ''} onChange={(e) => handleEdicionDefecto('defCalidad', def, e.target.value)} className="w-14 h-8 border rounded-lg text-center font-bold" /></div>)}
               </div>
             )}
-
             {tabDefectosEdicion === 'condicion' && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-2 max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">
-                {Object.keys(defectosCondicionBase).map(def => {
-                  const cant = cajaEnEdicion.defCondicion?.[def] ?? 0;
-                  return (
-                    <div key={def} className="flex items-center justify-between p-1 border-b border-slate-100">
-                      <span className="text-[13px] md:text-sm font-medium text-slate-700 truncate flex-1">{def}</span>
-                      <input type="number" value={cant === 0 ? '' : cant} onChange={(e) => handleEdicionDefecto('defCondicion', def, e.target.value)} className="w-14 h-8 border border-slate-300 rounded-lg text-center font-bold text-sm bg-white outline-none focus:border-red-500" />
-                    </div>
-                  );
-                })}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-2 max-h-[250px] overflow-y-auto custom-scrollbar">
+                {Object.keys(defectosCondicionBase).map(def => <div key={def} className="flex justify-between p-1 border-b border-slate-100"><span className="text-[13px] md:text-sm font-medium">{def}</span><input type="number" value={cajaEnEdicion.defCondicion?.[def] || ''} onChange={(e) => handleEdicionDefecto('defCondicion', def, e.target.value)} className="w-14 h-8 border rounded-lg text-center font-bold" /></div>)}
               </div>
             )}
-
-            <div className="flex flex-col md:flex-row justify-between items-center pt-3 border-t border-slate-100 gap-3">
-              <button 
-                onClick={() => eliminarCajaGuardada(cajaIndexEdicion)} 
-                className="w-full md:w-auto px-4 py-2 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-xl text-[11px] md:text-xs transition-colors flex items-center justify-center gap-1.5"
-              >
-                <Trash2 className="w-4 h-4" /> Eliminar caja
-              </button>
-              
-              <div className="flex gap-2 w-full md:w-auto">
-                <button onClick={() => setCajaEnEdicion(null)} className="flex-1 md:flex-none px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-[11px] md:text-xs transition-colors">Cancelar</button>
-                <button onClick={guardarCambiosCajaEditada} className="flex-1 md:flex-none px-5 py-2.5 bg-[#E96008] hover:bg-[#c74c04] text-white font-bold rounded-xl text-[11px] md:text-xs shadow-md transition-colors flex items-center justify-center gap-1.5">
-                  <Check className="w-4 h-4" /> Aplicar
-                </button>
+            <div className="flex justify-between pt-3 border-t border-slate-100">
+              <button onClick={() => eliminarCajaGuardada(cajaIndexEdicion)} className="px-4 py-2 bg-red-50 text-red-600 font-bold rounded-xl text-xs"><Trash2 className="w-4 h-4 inline" /> Eliminar</button>
+              <div className="flex gap-2">
+                <button onClick={() => setCajaEnEdicion(null)} className="px-4 py-2 bg-slate-100 text-slate-600 font-bold rounded-xl text-xs">Cancelar</button>
+                <button onClick={guardarCambiosCajaEditada} className="px-5 py-2 bg-[#E96008] text-white font-bold rounded-xl text-xs"><Check className="w-4 h-4 inline" /> Aplicar</button>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL CANCELAR INSPECCIÓN */}
       {showModalCancelar && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 md:p-8 border border-slate-100">
             <div className="flex flex-col items-center text-center">
-              <div className="w-14 h-14 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mb-4">
-                <AlertTriangle className="w-7 h-7" />
-              </div>
+              <div className="w-14 h-14 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mb-4"><AlertTriangle className="w-7 h-7" /></div>
               <h3 className="text-xl font-black text-slate-800 mb-2">Cancelar Inspección</h3>
-              <p className="text-slate-600 mb-6 text-sm leading-relaxed">
-                ¿Estás seguro de cancelar la inspección y volver al menú principal? Los datos evaluados de este proceso <span className="font-bold text-slate-800">no se guardarán</span>.
-              </p>
+              <p className="text-slate-600 mb-6 text-sm leading-relaxed">¿Estás seguro de cancelar la inspección y volver al menú principal? Los datos <span className="font-bold text-slate-800">no se guardarán</span>.</p>
               <div className="flex gap-3 w-full">
-                <button 
-                  onClick={() => setShowModalCancelar(false)} 
-                  className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-700 font-bold hover:bg-slate-50 text-sm transition-colors"
-                >
-                  Continuar
-                </button>
-                <button 
-                  onClick={confirmarCancelarProceso} 
-                  className="flex-1 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold shadow-md text-sm transition-colors"
-                >
-                  Sí, cancelar
-                </button>
+                <button onClick={() => setShowModalCancelar(false)} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-700 font-bold hover:bg-slate-50 text-sm transition-colors">Continuar</button>
+                <button onClick={confirmarCancelarProceso} className="flex-1 py-3 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold shadow-md text-sm transition-colors">Sí, cancelar</button>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL FINALIZAR PROCESO */}
       {showModalFinalizar && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
           <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md p-6 md:p-8">
             <div className="flex flex-col items-center text-center">
-              <div className="w-14 h-14 bg-orange-100 text-[#E96008] rounded-2xl flex items-center justify-center mb-4">
-                <AlertTriangle className="w-7 h-7" />
-              </div>
+              <div className="w-14 h-14 bg-orange-100 text-[#E96008] rounded-2xl flex items-center justify-center mb-4"><AlertTriangle className="w-7 h-7" /></div>
               <h3 className="text-xl font-black text-slate-800 mb-2">Finalizar Inspección</h3>
-              <p className="text-slate-600 mb-6 text-sm">¿Deseas concluir el registro y enviar los datos guardados al servidor?</p>
+              <p className="text-slate-600 mb-6 text-sm">¿Deseas concluir el registro y enviar los datos al servidor?</p>
               <div className="flex gap-3 w-full">
-                <button onClick={() => setShowModalFinalizar(false)} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-700 font-bold hover:bg-slate-50 text-sm">
-                  Continuar
-                </button>
-                <button onClick={() => { setShowModalFinalizar(false); enviarInspeccionAlServidor(); }} className="flex-1 py-3 rounded-xl bg-[#00A859] text-white font-bold hover:bg-[#008f4c] shadow-md text-sm">
-                  Sí, guardar
-                </button>
+                <button onClick={() => setShowModalFinalizar(false)} className="flex-1 py-3 rounded-xl border border-slate-300 text-slate-700 font-bold hover:bg-slate-50 text-sm">Continuar</button>
+                <button onClick={() => { setShowModalFinalizar(false); enviarInspeccionAlServidor(); }} className="flex-1 py-3 rounded-xl bg-[#00A859] text-white font-bold shadow-md text-sm">Sí, guardar</button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* === NUEVO MODAL DE ÉXITO === */}
+      {showModalExitoGuardado && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 md:p-8 text-center border border-slate-100">
+            <div className="w-20 h-20 bg-green-100 text-[#00A859] rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
+              <Check className="w-10 h-10" strokeWidth={3} />
+            </div>
+            <h3 className="text-2xl font-black text-slate-800 mb-2">¡Éxito!</h3>
+            <p className="text-slate-600 mb-8 text-[15px] leading-relaxed">
+              Inspección de proceso n° <span className="font-black text-slate-900">{numProceso}</span>, guardado correctamente.
+            </p>
+            <button 
+              onClick={() => {
+                setShowModalExitoGuardado(false);
+                if (onFinishedInspection) onFinishedInspection(parseInt(numProceso, 10));
+              }}
+              className="w-full py-3.5 rounded-xl bg-[#00A859] hover:bg-[#008f4c] text-white font-black shadow-lg shadow-green-500/30 text-sm md:text-base transition-all active:scale-[0.98]"
+            >
+              Aceptar y Salir
+            </button>
           </div>
         </div>
       )}

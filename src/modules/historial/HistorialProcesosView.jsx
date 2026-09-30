@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Search, Filter, MoreVertical, Edit3, Trash2, 
-  BarChart2, ChevronLeft, ChevronRight, ArrowLeft, Save, AlertTriangle, Plus, X, Check, Download
+  BarChart2, ChevronLeft, ChevronRight, ArrowLeft, Save, AlertTriangle, Plus, X, Check, Download, Eye
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas-pro';
@@ -101,19 +101,43 @@ export default function HistorialProcesosView({ onVerResumen, userRole }) {
     setPaginaActual(1);
   }, [filtroNumProceso, filtroCsgHuerto, filtroVariedad, filtroFecha, filtroCalificacion]);
 
-  const formatearFecha = (fechaStr) => {
-    if (!fechaStr) return 'Sin fecha';
-    try {
-      const fecha = new Date(fechaStr);
-      if (isNaN(fecha.getTime())) return 'Sin fecha';
-      
-      const dia = String(fecha.getDate()).padStart(2, '0');
-      const mes = String(fecha.getMonth() + 1).padStart(2, '0');
-      const anio = fecha.getFullYear();
-      return `${dia}-${mes}-${anio}`;
-    } catch (e) {
-      return 'Sin fecha';
+  // ==========================================
+  // FUNCIÓN INFALIBLE PARA ZONA HORARIA
+  // ==========================================
+  const obtenerFechaProceso = (proc) => {
+    if (!proc) return { texto: 'Sin fecha', valorFiltro: '' };
+
+    if (proc.fecha) {
+      try {
+        const f = new Date(proc.fecha);
+        if (!isNaN(f.getTime())) {
+          const dia = String(f.getUTCDate()).padStart(2, '0');
+          const mes = String(f.getUTCMonth() + 1).padStart(2, '0');
+          const anio = f.getUTCFullYear();
+          return { texto: `${dia}-${mes}-${anio}`, valorFiltro: `${anio}-${mes}-${dia}` };
+        }
+      } catch(e) {}
     }
+    
+    const fallback = proc.horaInicio || proc.created_at || proc.createdAt || proc.fecha_creacion || proc.date;
+    if (fallback) {
+      try {
+        const d = new Date(fallback);
+        if (!isNaN(d.getTime())) {
+          const texto = new Intl.DateTimeFormat('es-CL', {
+            timeZone: 'America/Santiago', day: '2-digit', month: '2-digit', year: 'numeric'
+          }).format(d).replace(/\//g, '-');
+          
+          const valorFiltro = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit'
+          }).format(d);
+
+          return { texto, valorFiltro };
+        }
+      } catch(e) {}
+    }
+
+    return { texto: 'Sin fecha', valorFiltro: '' };
   };
 
   const calcularMetricas = (proceso) => {
@@ -400,15 +424,8 @@ export default function HistorialProcesosView({ onVerResumen, userRole }) {
     if (filtroVariedad && p.variedad !== filtroVariedad) return false;
 
     if (filtroFecha) {
-      const fechaDB = p.created_at || p.createdAt || p.fecha || p.fecha_creacion || p.date;
-      if (!fechaDB) return false;
-      const d = new Date(fechaDB);
-      if (isNaN(d.getTime())) return false;
-      const dia = String(d.getDate()).padStart(2, '0');
-      const mes = String(d.getMonth() + 1).padStart(2, '0');
-      const anio = d.getFullYear();
-      const fechaDBStr = `${anio}-${mes}-${dia}`;
-      if (fechaDBStr !== filtroFecha) return false;
+      const fechaInfo = obtenerFechaProceso(p);
+      if (fechaInfo.valorFiltro !== filtroFecha) return false;
     }
 
     if (filtroCalificacion) {
@@ -528,15 +545,37 @@ export default function HistorialProcesosView({ onVerResumen, userRole }) {
                     procesosPaginados.map((proc) => {
                       const metricas = calcularMetricas(proc);
                       const isSelected = procesoSeleccionado?.id === proc.id;
-                      const fechaMostrar = proc.created_at || proc.createdAt || proc.fecha || proc.fecha_creacion || proc.date;
+                      const fechaData = obtenerFechaProceso(proc);
 
                       return (
                         <tr key={proc.id || proc.numProceso} onClick={() => setProcesoSeleccionado(proc)} className={`cursor-pointer transition-colors ${isSelected ? 'bg-orange-50/60' : 'hover:bg-slate-50/80'}`}>
+                          
                           <td className="py-4 px-6">
-                            <div className="flex items-center justify-center bg-white border border-slate-200 rounded-lg px-3 py-1.5 w-max mx-auto shadow-sm">
-                              <span className={`text-[11px] font-bold ${fechaMostrar ? 'text-slate-700' : 'text-slate-400'}`}>{formatearFecha(fechaMostrar)}</span>
+                            <div className="flex items-center justify-center gap-3 w-max mx-auto">
+                              {/* Botón Ojo Moderno y Minimalista */}
+                              <div className="relative group">
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); abrirVistaPrevia(proc.id); }} 
+                                  disabled={cargandoVistaPreviaId === proc.id}
+                                  className="p-1.5 text-slate-400 hover:text-[#E96008] bg-white hover:bg-orange-50/80 border border-slate-200/60 hover:border-orange-200 rounded-lg shadow-sm transition-all disabled:opacity-50 focus:outline-none"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </button>
+                                {/* Tooltip Moderno */}
+                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max px-2.5 py-1.5 bg-slate-800 text-white text-[10px] font-bold rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none shadow-xl z-50">
+                                  Ver resumen
+                                  <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-[1px] border-4 border-transparent border-t-slate-800"></div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-center bg-white border border-slate-200 rounded-lg px-3 py-1.5 shadow-sm">
+                                <span className={`text-[11px] font-bold ${fechaData.texto !== 'Sin fecha' ? 'text-slate-700' : 'text-slate-400'}`}>
+                                  {fechaData.texto}
+                                </span>
+                              </div>
                             </div>
                           </td>
+
                           <td className="py-4 px-6 text-center font-bold text-slate-800">{proc.numProceso}</td>
                           <td className="py-4 px-6 font-semibold text-slate-600">{proc.csg || '-'}</td>
                           
@@ -570,10 +609,6 @@ export default function HistorialProcesosView({ onVerResumen, userRole }) {
                                     <Edit3 className="w-4 h-4 text-blue-600" /><span>Editar proceso</span>
                                   </button>
                                 )}
-
-                                <button onClick={() => { setMenuProcesoAbiertoId(null); abrirVistaPrevia(proc.id); }} disabled={cargandoVistaPreviaId === proc.id} className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-orange-50 text-xs font-bold text-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                                  <BarChart2 className="w-4 h-4 text-[#E96008]" /><span>{cargandoVistaPreviaId === proc.id ? 'Cargando...' : 'Ver resumen de proceso'}</span>
-                                </button>
 
                                 <button onClick={() => descargarPDF(proc.id)} disabled={generandoReporteId === proc.id} className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-green-50 text-xs font-bold text-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                                   <Download className="w-4 h-4 text-green-600" /><span>{generandoReporteId === proc.id ? 'Generando...' : 'Descargar Informe PDF'}</span>
