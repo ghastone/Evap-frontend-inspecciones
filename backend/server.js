@@ -448,17 +448,197 @@ app.post('/api/parametros', async (req, res) => {
   }
 });
 
+
+// =========================================================================
+// 🔥🔥🔥 NUEVOS ENDPOINTS PARA MODO COLABORATIVO (FASE 1) 🔥🔥🔥
+// =========================================================================
+
+// Objeto global para mantener el registro de cajas reservadas/en curso por proceso.
+// Estructura: { procesoId: maxNumCajaEnCurso }
+const cajasEnCursoPorProceso = {};
+
+// A. INICIAR O UNIRSE A UN PROCESO
+app.post('/api/procesos/colaborativo/iniciar', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { numProceso, exportadora, csg, variedad, fecha, horaInicio } = req.body;
+
+    // 1. Buscar si el proceso ya existe
+    const procCheck = await client.query('SELECT id, estado FROM procesos WHERE num_proceso = $1', [numProceso]);
+    
+    let procesoId;
+
+    if (procCheck.rows.length > 0) {
+      const proceso = procCheck.rows[0];
+      // Si ya está terminado, bloqueamos.
+      if (proceso.estado !== 'En curso') {
+        throw new Error(`El proceso ${numProceso} ya fue finalizado (${proceso.estado}). No puedes unirte.`);
+      }
+      procesoId = proceso.id;
+    } else {
+      // 2. Si no existe, lo creamos "En curso"
+      const expRes = await client.query('SELECT id FROM exportadoras WHERE nombre = $1', [exportadora]);
+      if (expRes.rows.length === 0) throw new Error(`La exportadora "${exportadora}" no existe.`);
+
+      const varRes = await client.query('SELECT id FROM variedades WHERE nombre = $1', [variedad]);
+      if (varRes.rows.length === 0) throw new Error(`La variedad "${variedad}" no existe.`);
+
+      const huertoRes = await client.query('SELECT id FROM huertos WHERE csg = $1', [csg]);
+      if (huertoRes.rows.length === 0) throw new Error(`El huerto con CSG "${csg}" no existe.`);
+
+      const insertRes = await client.query(
+        `INSERT INTO procesos (num_proceso, exportadora_id, huerto_id, variedad_id, estado, hora_inicio, fecha) 
+         VALUES ($1, $2, $3, $4, 'En curso', $5, $6) RETURNING id`,
+        [numProceso, expRes.rows[0].id, huertoRes.rows[0].id, varRes.rows[0].id, horaInicio || new Date().toISOString(), fecha]
+      );
+      procesoId = insertRes.rows[0].id;
+    }
+
+    // 3. Calcular qué caja le toca a este usuario
+    // Buscamos cuál es la última caja REALMENTE guardada en la base de datos
+    const cajaRes = await client.query('SELECT MAX(num_caja) as max_caja FROM cajas WHERE proceso_id = $1', [procesoId]);
+    const maxCajaDb = cajaRes.rows[0].max_caja || 0;
+    
+    // Verificamos si hay alguna caja que ya está siendo inspeccionada (reservada en memoria) por otra persona
+    const maxCajaEnCurso = cajasEnCursoPorProceso[procesoId] || 0;
+
+    // La siguiente caja que le asignaremos será la mayor entre la DB y la que está en curso, más 1.
+    const nextCaja = Math.max(maxCajaDb, maxCajaEnCurso) + 1;
+
+    // Actualizamos el registro en memoria, reservando este nuevo número
+    cajasEnCursoPorProceso[procesoId] = nextCaja;
+
+    // 4. Traer las cajas que ya están guardadas para mostrarlas al usuario que se une
+    const cajasPreviasRes = await client.query(`
+      SELECT c.id as caja_id, c.num_caja as "numCaja", c.frutos_evaluados as frutos, 
+             c.calibre, c.brix, c.color_embalaje as color, d.nombre as defecto, cd.cantidad
+      FROM cajas c
+      LEFT JOIN caja_defectos cd ON c.id = cd.caja_id
+      LEFT JOIN defectos d ON cd.defecto_id = d.id
+      WHERE c.proceso_id = $1
+      ORDER BY c.num_caja ASC
+    `, [procesoId]);
+
+    const cajasMap = {};
+    cajasPreviasRes.rows.forEach(row => {
+      if (!cajasMap[row.caja_id]) {
+        cajasMap[row.caja_id] = { id: row.caja_id, numCaja: row.numCaja, frutos: row.frutos, calibre: row.calibre || '', brix: row.brix, color: row.color, defCalidad: {}, defCondicion: {} };
+      }
+      if (row.defecto && row.cantidad > 0) {
+        const listCalidad = ['Frutos deformes / dobles', 'Daños de trips', 'Golpe de sol', 'Manchas', 'Sutura (severa)', 'Herida cicatrizada', 'Desuniformidad de color', 'Russet', 'Fruta sin pedicelo', 'Falta de color', 'Bajo calibre', 'Sobre calibre'];
+        if (listCalidad.includes(row.defecto)) cajasMap[row.caja_id].defCalidad[row.defecto] = row.cantidad;
+        else cajasMap[row.caja_id].defCondicion[row.defecto] = row.cantidad;
+      }
+    });
+
+    await client.query('COMMIT');
+    res.json({ 
+      success: true, 
+      procesoId, 
+      nextCaja, 
+      cajasPrevias: Object.values(cajasMap),
+      mensaje: procCheck.rows.length > 0 ? 'Te uniste al proceso exitosamente' : 'Proceso creado' 
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    res.status(400).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// B. GUARDAR UNA CAJA INDIVIDUAL (Manejo de Colisiones)
+app.post('/api/procesos/colaborativo/caja', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { procesoId, caja } = req.body;
+
+    const defRes = await client.query('SELECT id, nombre FROM defectos');
+    const defectosMap = {};
+    defRes.rows.forEach(d => { defectosMap[d.nombre] = d.id; });
+
+    // 1. Verificamos cuál es la caja máxima REAL en la BD para evitar choques
+    const cajaResCheck = await client.query('SELECT MAX(num_caja) as max_caja FROM cajas WHERE proceso_id = $1', [procesoId]);
+    const maxCajaDb = cajaResCheck.rows[0].max_caja || 0;
+    
+    // Si la tablet envía la caja 1, pero alguien más ya envió la 1 (y ya está en DB), esta se guardará como la max+1.
+    let numCajaAInsertar = caja.numCaja;
+    if (caja.numCaja <= maxCajaDb) {
+      numCajaAInsertar = maxCajaDb + 1;
+    }
+
+    // 2. Insertar la caja
+    const cajaRes = await client.query(
+      `INSERT INTO cajas (proceso_id, num_caja, frutos_evaluados, calibre, brix, color_embalaje) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [procesoId, numCajaAInsertar, caja.frutos === '' ? 0 : caja.frutos, caja.calibre || null, caja.brix || null, caja.color]
+    );
+    
+    // 3. Insertar defectos
+    const todosLosDefectos = { ...(caja.defCalidad || {}), ...(caja.defCondicion || {}) };
+    for (const [nombreDefecto, cantidad] of Object.entries(todosLosDefectos)) {
+      if (cantidad > 0 && defectosMap[nombreDefecto]) {
+        await client.query(
+          'INSERT INTO caja_defectos (caja_id, defecto_id, cantidad) VALUES ($1, $2, $3)',
+          [cajaRes.rows[0].id, defectosMap[nombreDefecto], cantidad]
+        );
+      }
+    }
+
+    // 4. Calcular la SIGUIENTE caja disponible para esta tablet.
+    const maxCajaEnCurso = cajasEnCursoPorProceso[procesoId] || 0;
+    
+    // La siguiente caja será el mayor número entre: lo que acabamos de insertar, la BD, y lo que está reservado
+    const mayorNumeroAsignado = Math.max(numCajaAInsertar, maxCajaDb, maxCajaEnCurso);
+    const nextCaja = mayorNumeroAsignado + 1;
+    
+    // Actualizamos la reserva en memoria
+    cajasEnCursoPorProceso[procesoId] = nextCaja;
+
+    await client.query('COMMIT');
+    res.json({ success: true, cajaGuardada: { ...caja, id: cajaRes.rows[0].id, numCaja: numCajaAInsertar }, nextCaja });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// C. CANCELAR EVALUACIÓN DE UNA CAJA (Liberar reserva)
+app.post('/api/procesos/colaborativo/cancelar-caja', (req, res) => {
+  // Cuando un usuario cancela su caja, este endpoint permite registrar el evento.
+  // Podríamos implementar lógica compleja para reasignar este número, 
+  // pero para no interrumpir el flujo seguro secuencial, simplemente respondemos éxito.
+  res.json({ success: true });
+});
+
+// D. FINALIZAR EL PROCESO (Le da la nota global y limpia memoria)
+app.post('/api/procesos/colaborativo/finalizar', async (req, res) => {
+  try {
+    const { procesoId, estadoGlobal, horaFin } = req.body;
+    await pool.query(
+      'UPDATE procesos SET estado = $1, hora_fin = $2 WHERE id = $3',
+      [estadoGlobal, horaFin || new Date().toISOString(), procesoId]
+    );
+    // Limpiamos la reserva de este proceso
+    delete cajasEnCursoPorProceso[procesoId];
+    
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+// =========================================================================
+
 // ==========================================
-// 1. GUARDAR UN PROCESO NUEVO (POST)
+// MÉTODOS TRADICIONALES (Mantenidos por compatibilidad)
 // ==========================================
 app.post('/api/inspecciones', async (req, res) => {
-  console.log("¡HOLA! Recibí una petición para guardar el proceso N°:", req.body.numProceso);
-
   const client = await pool.connect(); 
   try {
     await client.query('BEGIN'); 
-    
-    // 🔥 Capturamos horaInicio, horaFin Y EL NUEVO CAMPO FECHA
     const { numProceso, exportadora, csg, variedad, estado, cajas, horaInicio, horaFin, fecha } = req.body;
 
     const expRes = await client.query('SELECT id FROM exportadoras WHERE nombre = $1', [exportadora]);
@@ -470,7 +650,6 @@ app.post('/api/inspecciones', async (req, res) => {
     const huertoRes = await client.query('SELECT id FROM huertos WHERE csg = $1', [csg]);
     if (huertoRes.rows.length === 0) throw new Error(`El huerto con CSG "${csg}" no existe.`);
 
-    // 🔥 Inyectamos hora_inicio, hora_fin y fecha explícita de Chile
     const procRes = await client.query(
       `INSERT INTO procesos (num_proceso, exportadora_id, huerto_id, variedad_id, estado, hora_inicio, hora_fin, fecha) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
@@ -503,122 +682,62 @@ app.post('/api/inspecciones', async (req, res) => {
       }
     }
     await client.query('COMMIT');
-    
     currentLiveProcess = null;
-    
     res.json({ success: true, procesoId });
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('❌ ERROR CRÍTICO GUARDANDO PROCESO:', error.message || error); 
     res.status(500).json({ error: error.message || 'Error de base de datos' });
   } finally {
     client.release();
   }
 });
 
-// ==========================================
-// 2. OBTENER HISTORIAL DE PROCESOS (GET)
-// ==========================================
 app.get('/api/inspecciones', async (req, res) => {
   try {
     const procRes = await pool.query(`
-      SELECT 
-        p.id, 
-        p.fecha, 
-        p.num_proceso as "numProceso", 
-        p.estado, 
-        p.hora_inicio as "horaInicio",
-        p.hora_fin as "horaFin",
-        e.nombre as exportadora, 
-        h.csg, 
-        h.productor, 
-        h.nombre_huerto as huerto, 
-        v.nombre as variedad
-      FROM procesos p
-      JOIN exportadoras e ON p.exportadora_id = e.id
-      JOIN huertos h ON p.huerto_id = h.id
-      JOIN variedades v ON p.variedad_id = v.id
-      ORDER BY p.id ASC
+      SELECT p.id, p.fecha, p.num_proceso as "numProceso", p.estado, p.hora_inicio as "horaInicio", p.hora_fin as "horaFin",
+             e.nombre as exportadora, h.csg, h.productor, h.nombre_huerto as huerto, v.nombre as variedad
+      FROM procesos p JOIN exportadoras e ON p.exportadora_id = e.id JOIN huertos h ON p.huerto_id = h.id JOIN variedades v ON p.variedad_id = v.id ORDER BY p.id ASC
     `);
-    
     const procesos = procRes.rows;
     if (procesos.length === 0) return res.json([]);
 
     const procIds = procesos.map(p => p.id);
     const cajasRes = await pool.query(`
-      SELECT c.id as caja_id, c.proceso_id, c.num_caja as "numCaja", c.frutos_evaluados as frutos, 
-             c.calibre, c.brix, c.color_embalaje as color, d.nombre as defecto, cd.cantidad
-      FROM cajas c
-      LEFT JOIN caja_defectos cd ON c.id = cd.caja_id
-      LEFT JOIN defectos d ON cd.defecto_id = d.id
-      WHERE c.proceso_id = ANY($1::int[])
-      ORDER BY c.num_caja ASC
+      SELECT c.id as caja_id, c.proceso_id, c.num_caja as "numCaja", c.frutos_evaluados as frutos, c.calibre, c.brix, c.color_embalaje as color, d.nombre as defecto, cd.cantidad
+      FROM cajas c LEFT JOIN caja_defectos cd ON c.id = cd.caja_id LEFT JOIN defectos d ON cd.defecto_id = d.id
+      WHERE c.proceso_id = ANY($1::int[]) ORDER BY c.num_caja ASC
     `, [procIds]);
 
-    const listCalidad = [
-      'Frutos deformes / dobles', 'Daños de trips', 'Golpe de sol', 'Manchas', 'Sutura (severa)', 'Herida cicatrizada',
-      'Desuniformidad de color', 'Russet', 'Fruta sin pedicelo', 'Falta de color', 'Bajo calibre', 'Sobre calibre'
-    ];
-
+    const listCalidad = ['Frutos deformes / dobles', 'Daños de trips', 'Golpe de sol', 'Manchas', 'Sutura (severa)', 'Herida cicatrizada', 'Desuniformidad de color', 'Russet', 'Fruta sin pedicelo', 'Falta de color', 'Bajo calibre', 'Sobre calibre'];
     const cajasMap = {};
     cajasRes.rows.forEach(row => {
-      if (!cajasMap[row.caja_id]) {
-        cajasMap[row.caja_id] = {
-          proceso_id: row.proceso_id,
-          numCaja: row.numCaja,
-          frutos: row.frutos,
-          calibre: row.calibre || '',
-          brix: row.brix,
-          color: row.color,
-          defCalidad: {},
-          defCondicion: {}
-        };
-      }
+      if (!cajasMap[row.caja_id]) { cajasMap[row.caja_id] = { proceso_id: row.proceso_id, numCaja: row.numCaja, frutos: row.frutos, calibre: row.calibre || '', brix: row.brix, color: row.color, defCalidad: {}, defCondicion: {} }; }
       if (row.defecto && row.cantidad > 0) {
-        if (listCalidad.includes(row.defecto)) {
-          cajasMap[row.caja_id].defCalidad[row.defecto] = row.cantidad;
-        } else {
-          cajasMap[row.caja_id].defCondicion[row.defecto] = row.cantidad;
-        }
+        if (listCalidad.includes(row.defecto)) cajasMap[row.caja_id].defCalidad[row.defecto] = row.cantidad;
+        else cajasMap[row.caja_id].defCondicion[row.defecto] = row.cantidad;
       }
     });
 
-    procesos.forEach(p => {
-      p.cajas = Object.values(cajasMap).filter(c => c.proceso_id === p.id);
-    });
-
+    procesos.forEach(p => { p.cajas = Object.values(cajasMap).filter(c => c.proceso_id === p.id); });
     res.json(procesos);
-  } catch (error) {
-    console.error('Error en GET /api/inspecciones:', error);
-    res.status(500).json({ error: 'Error al obtener inspecciones' });
-  }
+  } catch (error) { res.status(500).json({ error: 'Error al obtener inspecciones' }); }
 });
 
-// ==========================================
-// 3. EDITAR/ACTUALIZAR PROCESO COMPLETO (PUT)
-// ==========================================
 app.put('/api/inspecciones/:id', async (req, res) => {
   const client = await pool.connect(); 
   try {
     await client.query('BEGIN'); 
     const procesoId = req.params.id;
-    // 🔥 Capturamos la nueva fecha si viene
     const { numProceso, exportadora, csg, variedad, estado, cajas, horaInicio, horaFin, fecha } = req.body; 
 
     if (numProceso && exportadora && csg && variedad) {
       const expRes = await client.query('SELECT id FROM exportadoras WHERE nombre = $1', [exportadora]);
-      if (expRes.rows.length === 0) throw new Error(`La exportadora "${exportadora}" no existe.`);
-
       const varRes = await client.query('SELECT id FROM variedades WHERE nombre = $1', [variedad]);
-      if (varRes.rows.length === 0) throw new Error(`La variedad "${variedad}" no existe.`);
-
       const huertoRes = await client.query('SELECT id FROM huertos WHERE csg = $1', [csg]);
-      if (huertoRes.rows.length === 0) throw new Error(`El huerto con CSG "${csg}" no existe.`);
 
-      // 🔥 Actualizamos la fecha si es enviada, si no, se queda la anterior
       await client.query(
-        `UPDATE procesos 
-         SET num_proceso = $1, exportadora_id = $2, huerto_id = $3, variedad_id = $4, estado = $5,
+        `UPDATE procesos SET num_proceso = $1, exportadora_id = $2, huerto_id = $3, variedad_id = $4, estado = $5,
              hora_inicio = COALESCE($7, hora_inicio), hora_fin = COALESCE($8, hora_fin), fecha = COALESCE($9, fecha)
          WHERE id = $6`,
         [numProceso, expRes.rows[0].id, huertoRes.rows[0].id, varRes.rows[0].id, estado || 'Aprobado', procesoId, horaInicio || null, horaFin || null, fecha || null]
@@ -633,107 +752,57 @@ app.put('/api/inspecciones/:id', async (req, res) => {
     defRes.rows.forEach(d => { defectosMap[d.nombre] = d.id; });
 
     for (const caja of cajas) {
-      const frutosVal = caja.frutos === '' ? 0 : caja.frutos;
-      const brixVal = caja.brix === '' ? null : caja.brix;
-      const calibreVal = caja.calibre === '' ? null : caja.calibre;
-
       const cajaRes = await client.query(
         `INSERT INTO cajas (proceso_id, num_caja, frutos_evaluados, calibre, brix, color_embalaje) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-        [procesoId, caja.numCaja || 1, frutosVal, calibreVal, brixVal, caja.color]
+        [procesoId, caja.numCaja || 1, caja.frutos === '' ? 0 : caja.frutos, caja.calibre === '' ? null : caja.calibre, caja.brix === '' ? null : caja.brix, caja.color]
       );
 
       const todosLosDefectos = { ...(caja.defCalidad || {}), ...(caja.defCondicion || {}) };
       for (const [nombreDefecto, cantidad] of Object.entries(todosLosDefectos)) {
         if (cantidad > 0 && defectosMap[nombreDefecto]) {
-          await client.query(
-            'INSERT INTO caja_defectos (caja_id, defecto_id, cantidad) VALUES ($1, $2, $3)',
-            [cajaRes.rows[0].id, defectosMap[nombreDefecto], cantidad]
-          );
+          await client.query('INSERT INTO caja_defectos (caja_id, defecto_id, cantidad) VALUES ($1, $2, $3)', [cajaRes.rows[0].id, defectosMap[nombreDefecto], cantidad]);
         }
       }
     }
     
     await client.query('COMMIT');
-    res.json({ success: true, message: 'Proceso e inspecciones actualizados correctamente' });
+    res.json({ success: true, message: 'Proceso actualizado correctamente' });
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('Error en PUT /api/inspecciones:', error);
-    res.status(500).json({ error: error.message || 'Error actualizando la inspección' });
+    res.status(500).json({ error: error.message });
   } finally {
     client.release();
   }
 });
 
-// ==========================================
-// 4. ELIMINAR PROCESO COMPLETO (DELETE)
-// ==========================================
 app.delete('/api/inspecciones/:id', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const procesoId = parseInt(req.params.id, 10);
-
-    if (isNaN(procesoId)) {
-      throw new Error('El ID del proceso no es válido.');
-    }
-
     await client.query('DELETE FROM caja_defectos WHERE caja_id IN (SELECT id FROM cajas WHERE proceso_id = $1)', [procesoId]);
     await client.query('DELETE FROM cajas WHERE proceso_id = $1', [procesoId]);
-    const deleteRes = await client.query('DELETE FROM procesos WHERE id = $1', [procesoId]);
-
-    if (deleteRes.rowCount === 0) {
-      throw new Error('No se encontró el proceso en la base de datos.');
-    }
-
+    await client.query('DELETE FROM procesos WHERE id = $1', [procesoId]);
     await client.query('COMMIT');
     res.json({ success: true, message: 'Proceso eliminado con éxito' });
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('❌ Error en DELETE /api/inspecciones:', error.message || error);
-    res.status(500).json({ error: error.message || 'Error al eliminar el proceso de la base de datos' });
+    res.status(500).json({ error: error.message });
   } finally {
     client.release();
   }
 });
 
-// ==========================================
-// 5. OBTENER DATOS PARA INFORME PDF (GET)
-// ==========================================
 app.get('/api/procesos/:id/informe', async (req, res) => {
   try {
-    const { id } = req.params;
-    
-    // Solicitamos horaInicio y horaFin
-    const query = `
-      SELECT 
-        p.id AS proceso_id, 
-        p.fecha, 
-        p.hora_inicio as "horaInicio",
-        p.hora_fin as "horaFin",
-        h.nombre_huerto AS huerto,
-        h.productor,
-        h.csg,
-        e.nombre AS exportadora,
-        v.nombre AS variedad,
-        p.estado AS nota_estado
-      FROM procesos p
-      LEFT JOIN huertos h ON p.huerto_id = h.id
-      LEFT JOIN exportadoras e ON p.exportadora_id = e.id
-      LEFT JOIN variedades v ON p.variedad_id = v.id
-      WHERE p.id = $1
-    `;
-    
-    const result = await pool.query(query, [id]);
-    
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'Proceso no encontrado' });
-    }
-    
+    const result = await pool.query(`
+      SELECT p.id AS proceso_id, p.fecha, p.hora_inicio as "horaInicio", p.hora_fin as "horaFin",
+             h.nombre_huerto AS huerto, h.productor, h.csg, e.nombre AS exportadora, v.nombre AS variedad, p.estado AS nota_estado
+      FROM procesos p LEFT JOIN huertos h ON p.huerto_id = h.id LEFT JOIN exportadoras e ON p.exportadora_id = e.id LEFT JOIN variedades v ON p.variedad_id = v.id WHERE p.id = $1
+    `, [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Proceso no encontrado' });
     res.json(result.rows[0]);
-  } catch (error) {
-    console.error('Error en GET /api/procesos/:id/informe:', error);
-    res.status(500).json({ error: 'Error al obtener los datos del informe' });
-  }
+  } catch (error) { res.status(500).json({ error: 'Error al obtener datos' }); }
 });
 
 const PORT = process.env.PORT || 3001;

@@ -15,7 +15,7 @@ import ParametrosCalificacion from './modules/ajustes/ParametrosCalificacion';
 import GestionUsuarios from './modules/ajustes/GestionUsuarios'; 
 
 import { 
-  LogOut, PlusCircle, ClipboardList, LayoutDashboard, Settings, User, 
+  LogOut, PlusCircle, ClipboardList, LineChart, Settings, User, 
   ChevronLeft, ChevronRight, ChevronDown, X
 } from 'lucide-react';
 
@@ -26,7 +26,6 @@ export default function App() {
   });
   
   // ================= MEMORIA PERSISTENTE DE RUTAS =================
-  // Ahora la App recuerda en qué vista estabas antes de presionar F5
   const [currentView, setCurrentView] = useState(() => {
     return localStorage.getItem('qc_current_view') || 'home';
   });
@@ -35,13 +34,11 @@ export default function App() {
     return localStorage.getItem('qc_is_collapsed') === 'true';
   });
 
-  // Ahora la App recuerda los datos del proceso si se reinicia el navegador
   const [datosProcesoActivo, setDatosProcesoActivo] = useState(() => {
     const saved = localStorage.getItem('inspeccionActiva');
     return saved ? JSON.parse(saved) : null;
   });
 
-  // Efectos para guardar automáticamente el estado actual
   useEffect(() => { localStorage.setItem('qc_current_view', currentView); }, [currentView]);
   useEffect(() => { localStorage.setItem('qc_is_collapsed', isCollapsed); }, [isCollapsed]);
   useEffect(() => {
@@ -320,7 +317,32 @@ export default function App() {
   // Rutas que ocupan pantalla completa sin Sidebar tradicional (para móvil o procesos en vivo)
   if (['nuevo-proceso', 'inspeccion', 'dashboard_live', 'dashboard_resumen', 'dashboard_historico'].includes(currentView)) {
     return (
-      <div className="w-screen h-screen overflow-hidden bg-slate-50 relative">
+      <div className="w-screen h-screen overflow-hidden bg-slate-50 relative" style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+        
+        {/* ESTILOS DE ANIMACIÓN GLOBAL INYECTADOS */}
+        <style>{`
+          @keyframes ping-radar {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+          }
+          .live-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            transition: background-color 0.3s ease, box-shadow 0.3s ease;
+          }
+          .live-dot-active {
+            background-color: #10b981;
+            animation: ping-radar 2s infinite cubic-bezier(0.4, 0, 0.6, 1);
+          }
+          .live-dot-inactive {
+            background-color: #94A3B8;
+            box-shadow: none;
+          }
+        `}</style>
+
         {currentView === 'nuevo-proceso' && (
           <NuevoProceso 
             exportadoras={dbData.exportadoras}
@@ -365,60 +387,62 @@ export default function App() {
           <DashboardHistoricoTemporada onClose={() => intentarNavegar('home')} onAbrirMenu={() => setShowDrawer(true)} />
         )}
 
-        {/* DRAWER MÓVIL */}
+        {/* DRAWER MÓVIL (Mantiene clases idénticas al Sidebar Desktop para coherencia) */}
         {showDrawer && (
           <div className="fixed inset-0 z-[200] flex animate-fade-in">
             <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={() => setShowDrawer(false)} />
-            <aside className="relative w-[280px] max-w-[80vw] bg-white h-full shadow-2xl flex flex-col z-10 animate-slide-right">
-              <div className="h-20 flex items-center justify-between border-b border-slate-100 px-5 shrink-0">
+            <aside className="relative w-[280px] max-w-[80vw] bg-[#FFFFFF] h-full shadow-2xl flex flex-col z-10 animate-slide-right border-r border-[#F1F5F9]">
+              <div className="h-20 flex items-center justify-between border-b border-[#F1F5F9] px-5 shrink-0">
                 <img src="/Logo_goldanda.png" alt="Gold Anda" className="h-9 w-auto object-contain" onError={(e) => { e.target.style.display = 'none'; }} />
-                <button onClick={() => setShowDrawer(false)} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-colors"><X className="w-5 h-5" /></button>
+                <button onClick={() => setShowDrawer(false)} className="p-2 text-[#94A3B8] hover:text-[#0F172A] hover:bg-[#F8FAFC] rounded-xl transition-colors"><X className="w-5 h-5" /></button>
               </div>
               <nav className="flex-1 py-6 px-4 space-y-2 overflow-y-auto custom-scrollbar">
                 
                 {['admin', 'qc'].includes(user.role) && (
-                  <button onClick={() => intentarNavegar('nuevo-proceso')} className="w-full flex items-center px-4 py-3 rounded-xl bg-orange-50 text-[#E96008] font-bold text-left text-sm">
-                    <PlusCircle className="w-5 h-5 text-[#E96008] shrink-0 mr-3" /><span>Crear Proceso</span>
+                  <button onClick={() => intentarNavegar('nuevo-proceso')} className={`group w-full flex items-center px-4 py-3 bg-[#F0FDF4] hover:bg-[#DCFCE7] border border-[#A7F3D0] hover:border-[#86EFAC] rounded-[14px] text-[#065F46] transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-[1px] hover:shadow-[0_4px_12px_-2px_rgba(16,185,129,0.12)] active:scale-[0.98]`}>
+                    <PlusCircle className={`w-5 h-5 text-[#059669] shrink-0 group-hover:rotate-90 group-hover:scale-[1.08] transition-transform duration-200`} />
+                    <span className="text-[14px] font-semibold truncate ml-3">Crear Proceso</span>
                   </button>
                 )}
                 
-                <button onClick={() => intentarNavegar('historial')} className="w-full flex items-center px-4 py-3 rounded-xl text-slate-600 hover:bg-slate-50 font-semibold text-left text-sm">
-                  <ClipboardList className="w-5 h-5 text-blue-600 shrink-0 mr-3" /><span>Historial</span>
+                <button onClick={() => intentarNavegar('historial')} className={`group w-full flex items-center px-3.5 py-2.5 rounded-[10px] transition-all duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] ${currentView === 'historial' ? 'bg-[#F8FAFC] text-[#0F172A]' : 'text-[#1E293B] hover:bg-[#F8FAFC] hover:text-[#0F172A] hover:translate-x-[3px]'}`}>
+                  <ClipboardList className="w-5 h-5 text-[#2563EB] shrink-0 group-hover:-rotate-[12deg] group-hover:scale-[1.05] transition-transform duration-150" />
+                  <span className="text-[14px] font-semibold truncate ml-3">Historial</span>
                 </button>
                 
-                {/* SECCIÓN ANÁLISIS EN DRAWER MÓVIL */}
-                <div className="pt-4 mt-2 mb-2 border-t border-slate-100"><p className="px-4 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Análisis</p></div>
+                {/* SECCIÓN ANÁLISIS */}
+                <div className="pt-4 mt-2 mb-2 border-t border-[#F1F5F9]"><p className="px-4 text-[11px] font-bold text-[#94A3B8] uppercase tracking-wider">Análisis</p></div>
                 <div className="flex flex-col">
-                  <button onClick={() => setDashboardsAbierto(!dashboardsAbierto)} className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-slate-600 hover:bg-slate-50 font-semibold text-left text-sm">
-                    <div className="flex items-center"><LayoutDashboard className="w-5 h-5 text-[#E96008] shrink-0 mr-3" /><span>Dashboards</span></div>
-                    <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${dashboardsAbierto ? 'rotate-180' : ''}`} />
+                  <button onClick={() => setDashboardsAbierto(!dashboardsAbierto)} className={`group w-full flex items-center justify-between px-3.5 py-2.5 rounded-[10px] transition-all duration-150 ${dashboardsAbierto ? 'bg-[#FFF7ED] border border-[#FFEDD5] text-[#9A3412]' : 'text-[#1E293B] hover:bg-[#F8FAFC] hover:text-[#0F172A]'}`}>
+                    <div className="flex items-center">
+                      {/* Icono de métricas actualizado */}
+                      <LineChart className={`w-5 h-5 text-[#EA580C] shrink-0 ${!dashboardsAbierto && 'group-hover:scale-105'} transition-transform duration-150`} />
+                      <span className="text-[14px] font-semibold truncate ml-3">Panel de métricas</span>
+                    </div>
+                    <ChevronDown className={`w-4 h-4 text-[#EA580C] transition-transform duration-300 ${dashboardsAbierto ? 'rotate-180' : ''}`} />
                   </button>
                   {dashboardsAbierto && (
-                    <div className="mt-1 flex flex-col space-y-1">
+                    <div className="mt-1 flex flex-col space-y-1 animate-fade-in">
                       <button 
                         onClick={() => { intentarNavegar('dashboard_live'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }} 
-                        className={`relative flex items-center w-full text-left pl-12 pr-4 py-2.5 rounded-xl transition-all ${currentView === 'dashboard_live' ? 'bg-orange-50 text-[#E96008]' : 'text-slate-800 hover:bg-slate-50'}`}
+                        className={`group flex items-center w-full text-left py-2 pr-3 rounded-lg transition-all duration-150 ${currentView === 'dashboard_live' ? 'bg-[#F8FAFC] pl-[40px] text-[#0F172A]' : 'pl-[36px] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] hover:pl-[40px]'}`}
                       >
                         <div className="flex items-center gap-2">
-                          <span className={`w-1.5 h-1.5 rounded-full ${currentView === 'dashboard_live' ? 'bg-[#E96008] animate-pulse' : 'bg-slate-400'}`}></span>
-                          <span className="font-extrabold text-[14px]">Evap <span className="font-semibold text-[12px] opacity-70">(análisis en vivo)</span></span>
+                          <span className={`live-dot ${datosProcesoActivo ? 'live-dot-active' : 'live-dot-inactive'}`}></span>
+                          <span className="font-medium text-[13px]">Evap <span className="text-[11px] font-normal text-[#64748B]">(análisis en vivo)</span></span>
                         </div>
                       </button>
                       
-                      <div className="h-px bg-slate-200/70 mx-10 my-0.5"></div>
-                      
                       <button 
                         onClick={() => { intentarNavegar('dashboard_resumen'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }}
-                        className={`w-full text-left pl-12 pr-4 py-2.5 rounded-xl transition-all font-bold text-[14px] ${currentView === 'dashboard_resumen' ? 'bg-orange-50 text-[#E96008]' : 'text-slate-700 hover:bg-slate-50'}`}
+                        className={`group w-full text-left py-2 pr-3 rounded-lg transition-all duration-150 font-medium text-[13px] ${currentView === 'dashboard_resumen' ? 'bg-[#F8FAFC] pl-[40px] text-[#0F172A]' : 'pl-[36px] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] hover:pl-[40px]'}`}
                       >
                         Resumen Diario
                       </button>
 
-                      <div className="h-px bg-slate-200/70 mx-10 my-0.5"></div>
-                      
                       <button 
                         onClick={() => { intentarNavegar('dashboard_historico'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }}
-                        className={`w-full text-left pl-12 pr-4 py-2.5 rounded-xl transition-all font-bold text-[14px] ${currentView === 'dashboard_historico' ? 'bg-orange-50 text-[#E96008]' : 'text-slate-700 hover:bg-slate-50'}`}
+                        className={`group w-full text-left py-2 pr-3 rounded-lg transition-all duration-150 font-medium text-[13px] ${currentView === 'dashboard_historico' ? 'bg-[#F8FAFC] pl-[40px] text-[#0F172A]' : 'pl-[36px] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] hover:pl-[40px]'}`}
                       >
                         Histórico Temporada
                       </button>
@@ -426,38 +450,46 @@ export default function App() {
                   )}
                 </div>
 
-                {/* SECCIÓN AJUSTES EN DRAWER MÓVIL */}
+                {/* SECCIÓN ADMINISTRACIÓN */}
                 {user.role === 'admin' && (
                   <>
-                    <div className="pt-4 mt-2 mb-2 border-t border-slate-100"><p className="px-4 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Administración</p></div>
+                    <div className="pt-4 mt-2 mb-2 border-t border-[#F1F5F9]"><p className="px-4 text-[11px] font-bold text-[#94A3B8] uppercase tracking-wider">Administración</p></div>
                     <div className="flex flex-col">
-                      <button onClick={() => setShowAjustes(!showAjustes)} className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-slate-600 hover:bg-slate-50 font-semibold text-left text-sm">
-                        <div className="flex items-center"><Settings className="w-5 h-5 text-slate-600 shrink-0 mr-3" /><span>Ajustes</span></div>
-                        <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showAjustes ? 'rotate-180' : ''}`} />
+                      <button onClick={() => setShowAjustes(!showAjustes)} className={`group w-full flex items-center justify-between px-3.5 py-2.5 rounded-[10px] transition-all duration-150 ${showAjustes ? 'bg-[#F8FAFC] text-[#0F172A]' : 'text-[#334155] hover:bg-[#F8FAFC]'}`}>
+                        <div className="flex items-center">
+                          <Settings className="w-5 h-5 text-[#334155] shrink-0 group-hover:rotate-45 transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]" />
+                          <span className="text-[14px] font-semibold truncate ml-3">Ajustes</span>
+                        </div>
+                        <ChevronDown className={`w-4 h-4 text-[#94A3B8] transition-transform duration-300 ${showAjustes ? 'rotate-180' : ''}`} />
                       </button>
                       {showAjustes && (
-                        <div className="mt-1 pl-12 flex flex-col space-y-1">
-                          <button onClick={() => intentarNavegar('ajustes-exportadoras')} className="text-left text-sm py-2 px-3 text-slate-500 hover:text-slate-900 rounded-lg">Exportadoras</button>
-                          <button onClick={() => intentarNavegar('ajustes-variedades')} className="text-left text-sm py-2 px-3 text-slate-500 hover:text-slate-900 rounded-lg">Variedades</button>
-                          <button onClick={() => intentarNavegar('ajustes-huertos')} className="text-left text-sm py-2 px-3 text-slate-500 hover:text-slate-900 rounded-lg">Productores/Huertos</button>
-                          <button onClick={() => intentarNavegar('ajustes-parametros')} className="text-left text-sm py-2 px-3 text-slate-500 hover:text-slate-900 rounded-lg">Parámetros Calificación</button>
-                          <button onClick={() => intentarNavegar('ajustes-usuarios')} className="text-left text-sm py-2 px-3 text-slate-500 hover:text-slate-900 rounded-lg">Usuarios</button>
+                        <div className="mt-1 flex flex-col space-y-1 animate-fade-in">
+                          {['exportadoras', 'variedades', 'huertos', 'parametros', 'usuarios'].map((item) => (
+                            <button 
+                              key={item}
+                              onClick={() => intentarNavegar(`ajustes-${item}`)} 
+                              className={`group w-full text-left py-2 pr-3 rounded-lg transition-all duration-150 font-medium text-[13px] ${currentView === `ajustes-${item}` ? 'bg-[#F8FAFC] pl-[40px] text-[#0F172A]' : 'pl-[36px] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] hover:pl-[40px]'}`}
+                            >
+                              {item === 'huertos' ? 'Productores/Huertos' : item === 'parametros' ? 'Parámetros Calificación' : item.charAt(0).toUpperCase() + item.slice(1)}
+                            </button>
+                          ))}
                         </div>
                       )}
                     </div>
                   </>
                 )}
               </nav>
-              <div className="p-4 border-t border-slate-100 bg-slate-50/50">
-                <div className="flex items-center gap-3 mb-3 px-1">
-                  <div className="w-9 h-9 rounded-full bg-white border border-slate-200 flex items-center justify-center text-slate-600 font-bold shrink-0"><User className="w-4 h-4" /></div>
+              <div className="p-3 border-t border-[#F1F5F9] bg-[#F8FAFC]">
+                <div className="flex items-center gap-3 mb-4 px-2">
+                  <div className="w-10 h-10 rounded-full bg-[#FFFFFF] border border-[#E2E8F0] flex items-center justify-center text-[#475569] font-bold shrink-0"><User className="w-5 h-5" /></div>
                   <div className="overflow-hidden">
-                    <p className="text-slate-800 text-xs font-bold capitalize truncate">{user.username}</p>
-                    <p className="text-[10px] text-slate-500 uppercase font-black">{user.role}</p>
+                    <p className="text-[#0F172A] text-[14px] font-semibold capitalize truncate">{user.username}</p>
+                    <p className="text-[10px] text-[#64748B] uppercase font-bold tracking-[0.06em]">{user.role === 'admin' ? 'Administrador' : user.role === 'qc' ? 'Control Calidad' : 'Gerencia'}</p>
                   </div>
                 </div>
-                <button onClick={handleLogout} className="w-full flex items-center justify-center gap-2 py-2.5 bg-white border border-slate-200 hover:bg-red-50 text-slate-600 hover:text-red-600 rounded-xl text-xs font-bold transition-colors">
-                  <LogOut className="w-4 h-4" /><span>Cerrar Sesión</span>
+                <button onClick={handleLogout} className="group w-full flex items-center justify-center gap-2 py-2.5 px-3.5 bg-[#FFFFFF] border border-[#E2E8F0] hover:border-[#FECACA] hover:bg-[#FEF2F2] text-[#334155] hover:text-[#DC2626] rounded-[12px] transition-all duration-150 text-[13px] font-semibold hover:shadow-[0_2px_6px_-1px_rgba(239,68,68,0.1)] active:scale-[0.98]">
+                  <LogOut className="w-4 h-4 shrink-0 group-hover:translate-x-[3px] transition-transform duration-150" />
+                  <span>Cerrar Sesión</span>
                 </button>
               </div>
             </aside>
@@ -469,71 +501,95 @@ export default function App() {
     );
   }
 
-  // ================= VIEW DESKTOP PRINCIPAL =================
+  // ================= VIEW DESKTOP PRINCIPAL (Sidebar Animado & Personalizado) =================
   return (
-    <div className="flex h-screen bg-[#F4F7FA] font-sans overflow-hidden relative">
-      <aside className={`${isCollapsed ? 'w-20' : 'w-[260px]'} bg-white border-r border-slate-200 flex flex-col shadow-sm z-20 shrink-0 transition-all duration-300 relative`}>
-        <button onClick={() => setIsCollapsed(!isCollapsed)} className="absolute -right-3 top-7 bg-white border border-slate-200 text-slate-600 rounded-full p-1 shadow-md hover:bg-slate-50 transition-colors z-30">
+    <div className="flex h-screen bg-[#F4F7FA] overflow-hidden relative" style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
+      
+      {/* ESTILOS DE ANIMACIÓN GLOBAL INYECTADOS */}
+      <style>{`
+        @keyframes ping-radar {
+          0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+          70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+          100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+        .live-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          display: inline-block;
+          transition: background-color 0.3s ease, box-shadow 0.3s ease;
+        }
+        .live-dot-active {
+          background-color: #10b981;
+          animation: ping-radar 2s infinite cubic-bezier(0.4, 0, 0.6, 1);
+        }
+        .live-dot-inactive {
+          background-color: #94A3B8;
+          box-shadow: none;
+        }
+      `}</style>
+
+      <aside className={`${isCollapsed ? 'w-20' : 'w-[260px]'} bg-[#FFFFFF] border-r border-[#F1F5F9] flex flex-col shadow-[0_1px_3px_rgba(0,0,0,0.02)] z-20 shrink-0 transition-all duration-300 relative`}>
+        <button onClick={() => setIsCollapsed(!isCollapsed)} className="absolute -right-3 top-7 bg-white border border-[#E2E8F0] text-[#475569] rounded-full p-1 shadow-md hover:bg-[#F8FAFC] transition-colors z-30">
           {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
         </button>
-        <div className="h-20 flex items-center justify-center border-b border-slate-100 px-4 shrink-0">
+        <div className="h-20 flex items-center justify-center border-b border-[#F1F5F9] px-4 shrink-0">
           <img src="/Logo_goldanda.png" alt="Gold Anda" className={`${isCollapsed ? 'h-7' : 'h-10'} w-auto object-contain transition-all`} onError={(e) => { e.target.style.display = 'none'; }} />
         </div>
         
         <nav className="flex-1 py-6 px-3 space-y-2 overflow-y-auto custom-scrollbar">
           
           {['admin', 'qc'].includes(user.role) && (
-            <button onClick={() => intentarNavegar('nuevo-proceso')} className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'px-4'} py-3 rounded-xl transition-all text-left ${currentView === 'nuevo-proceso' ? 'bg-orange-50 text-[#E96008] font-bold' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'}`}>
-              <PlusCircle className="w-6 h-6 text-green-600 shrink-0" />{!isCollapsed && <span className="text-sm truncate ml-3 font-semibold">Crear Proceso</span>}
+            <button onClick={() => intentarNavegar('nuevo-proceso')} className={`group w-full flex items-center ${isCollapsed ? 'justify-center px-0 py-3' : 'px-4 py-3'} bg-[#F0FDF4] hover:bg-[#DCFCE7] border border-[#A7F3D0] hover:border-[#86EFAC] rounded-[14px] text-[#065F46] transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-[1px] hover:shadow-[0_4px_12px_-2px_rgba(16,185,129,0.15)] active:scale-[0.98]`}>
+              <PlusCircle className="w-5 h-5 text-[#059669] shrink-0 group-hover:rotate-90 group-hover:scale-[1.08] transition-transform duration-300" />
+              {!isCollapsed && <span className="text-[14px] font-semibold truncate ml-3">Crear Proceso</span>}
             </button>
           )}
           
-          <button onClick={() => intentarNavegar('historial')} className={`w-full flex items-center ${isCollapsed ? 'justify-center px-0' : 'px-4'} py-3 rounded-xl transition-all text-left ${currentView === 'historial' ? 'bg-orange-50 text-[#E96008] font-bold' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'}`}>
-            <ClipboardList className="w-6 h-6 text-blue-600 shrink-0" />{!isCollapsed && <span className="text-sm truncate ml-3">Historial</span>}
+          <button onClick={() => intentarNavegar('historial')} className={`group w-full flex items-center ${isCollapsed ? 'justify-center px-0 py-2.5' : 'px-3.5 py-2.5'} rounded-[10px] transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${currentView === 'historial' ? 'bg-[#F8FAFC] text-[#0F172A]' : 'text-[#1E293B] hover:bg-[#F8FAFC] hover:text-[#0F172A] hover:translate-x-[3px]'}`}>
+            <ClipboardList className="w-5 h-5 text-[#2563EB] shrink-0 group-hover:-rotate-[12deg] group-hover:scale-[1.05] transition-transform duration-200" />
+            {!isCollapsed && <span className="text-[14px] font-semibold truncate ml-3">Historial</span>}
           </button>
           
           {/* SECCIÓN ANÁLISIS AGRUPADA */}
-          <div className="pt-4 mt-2 mb-2 border-t border-slate-100">
-            {!isCollapsed && <p className="px-4 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Análisis</p>}
+          <div className="pt-4 mt-2 mb-2 border-t border-[#F1F5F9]">
+            {!isCollapsed && <p className="px-4 text-[11px] font-bold text-[#94A3B8] uppercase tracking-wider">Análisis</p>}
           </div>
           <div className="flex flex-col">
             <button 
               onClick={() => { if (isCollapsed) { setIsCollapsed(false); setDashboardsAbierto(true); } else { setDashboardsAbierto(!dashboardsAbierto); } }} 
-              className={`w-full flex items-center justify-between ${isCollapsed ? 'justify-center px-0' : 'px-4'} py-3 rounded-xl transition-all text-left ${dashboardsAbierto && !isCollapsed ? 'bg-slate-50 text-slate-900 font-bold' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'}`}
+              className={`group w-full flex items-center justify-between ${isCollapsed ? 'justify-center px-0 py-2.5' : 'px-3.5 py-2.5'} rounded-[10px] transition-all duration-200 ${dashboardsAbierto && !isCollapsed ? 'bg-[#FFF7ED] border border-[#FFEDD5] text-[#9A3412]' : 'text-[#1E293B] hover:bg-[#F8FAFC] hover:text-[#0F172A]'}`}
             >
               <div className="flex items-center">
-                <LayoutDashboard className="w-6 h-6 text-[#E96008] shrink-0" />
-                {!isCollapsed && <span className="text-sm truncate ml-3">Dashboards</span>}
+                {/* Icono de métricas actualizado */}
+                <LineChart className={`w-5 h-5 text-[#EA580C] shrink-0 ${!dashboardsAbierto ? 'group-hover:scale-105' : ''} transition-transform duration-200`} />
+                {!isCollapsed && <span className="text-[14px] font-semibold truncate ml-3">Panel de métricas</span>}
               </div>
-              {!isCollapsed && <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${dashboardsAbierto ? 'rotate-180' : ''}`} />}
+              {!isCollapsed && <ChevronDown className={`w-4 h-4 text-[#EA580C] transition-transform duration-300 ${dashboardsAbierto ? 'rotate-180' : ''}`} />}
             </button>
             
             {dashboardsAbierto && !isCollapsed && (
               <div className="mt-1 flex flex-col space-y-1 animate-fade-in">
                 <button 
                   onClick={() => { intentarNavegar('dashboard_live'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }} 
-                  className={`relative flex items-center w-full text-left pl-12 pr-4 py-2.5 rounded-xl transition-all ${currentView === 'dashboard_live' ? 'bg-orange-50 text-[#E96008]' : 'text-slate-800 hover:bg-slate-50'}`}
+                  className={`group flex items-center w-full text-left py-2 pr-3 rounded-lg transition-all duration-200 ${currentView === 'dashboard_live' ? 'bg-[#F8FAFC] pl-[40px] text-[#0F172A]' : 'pl-[36px] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] hover:pl-[40px]'}`}
                 >
                   <div className="flex items-center gap-2">
-                    <span className={`w-1.5 h-1.5 rounded-full ${currentView === 'dashboard_live' ? 'bg-[#E96008] animate-pulse' : 'bg-slate-400'}`}></span>
-                    <span className="font-extrabold text-[14px]">Evap <span className="font-semibold text-[12px] opacity-70">(análisis en vivo)</span></span>
+                    <span className={`live-dot ${datosProcesoActivo ? 'live-dot-active' : 'live-dot-inactive'}`}></span>
+                    <span className="font-medium text-[13px]">Evap <span className="text-[11px] font-normal text-[#64748B]">(análisis en vivo)</span></span>
                   </div>
                 </button>
                 
-                <div className="h-px bg-slate-200/70 mx-10 my-0.5"></div>
-                
                 <button 
                   onClick={() => { intentarNavegar('dashboard_resumen'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }} 
-                  className={`w-full text-left pl-12 pr-4 py-2.5 rounded-xl transition-all font-bold text-[14px] ${currentView === 'dashboard_resumen' ? 'bg-orange-50 text-[#E96008]' : 'text-slate-700 hover:bg-slate-50'}`}
+                  className={`group w-full text-left py-2 pr-3 rounded-lg transition-all duration-200 font-medium text-[13px] ${currentView === 'dashboard_resumen' ? 'bg-[#F8FAFC] pl-[40px] text-[#0F172A]' : 'pl-[36px] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] hover:pl-[40px]'}`}
                 >
                   Resumen Diario
                 </button>
 
-                <div className="h-px bg-slate-200/70 mx-10 my-0.5"></div>
-                
                 <button 
                   onClick={() => { intentarNavegar('dashboard_historico'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }} 
-                  className={`w-full text-left pl-12 pr-4 py-2.5 rounded-xl transition-all font-bold text-[14px] ${currentView === 'dashboard_historico' ? 'bg-orange-50 text-[#E96008]' : 'text-slate-700 hover:bg-slate-50'}`}
+                  className={`group w-full text-left py-2 pr-3 rounded-lg transition-all duration-200 font-medium text-[13px] ${currentView === 'dashboard_historico' ? 'bg-[#F8FAFC] pl-[40px] text-[#0F172A]' : 'pl-[36px] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] hover:pl-[40px]'}`}
                 >
                   Histórico Temporada
                 </button>
@@ -544,30 +600,32 @@ export default function App() {
           {/* Permiso Sidebar: Solo Admin ve Ajustes */}
           {user.role === 'admin' && (
             <>
-              <div className="pt-4 mt-2 mb-2 border-t border-slate-100">
-                {!isCollapsed && <p className="px-4 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Administración</p>}
+              <div className="pt-4 mt-2 mb-2 border-t border-[#F1F5F9]">
+                {!isCollapsed && <p className="px-4 text-[11px] font-bold text-[#94A3B8] uppercase tracking-wider">Administración</p>}
               </div>
               <div className="flex flex-col">
                 <button 
                   onClick={() => { if (isCollapsed) setIsCollapsed(false); setShowAjustes(!showAjustes); }} 
-                  className={`w-full flex items-center justify-between ${isCollapsed ? 'justify-center px-0' : 'px-4'} py-3 rounded-xl transition-all text-left ${showAjustes ? 'bg-slate-50 text-slate-900 font-bold' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900 font-medium'}`}
+                  className={`group w-full flex items-center justify-between ${isCollapsed ? 'justify-center px-0 py-2.5' : 'px-3.5 py-2.5'} rounded-[10px] transition-all duration-200 ${showAjustes ? 'bg-[#F8FAFC] text-[#0F172A]' : 'text-[#334155] hover:bg-[#F8FAFC]'}`}
                 >
                   <div className="flex items-center">
-                    <Settings className="w-6 h-6 text-slate-600 shrink-0" />
-                    {!isCollapsed && <span className="text-sm truncate ml-3">Ajustes</span>}
+                    <Settings className="w-5 h-5 text-[#334155] shrink-0 group-hover:rotate-45 transition-transform duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]" />
+                    {!isCollapsed && <span className="text-[14px] font-semibold truncate ml-3">Ajustes</span>}
                   </div>
-                  {!isCollapsed && <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${showAjustes ? 'rotate-180' : ''}`} />}
+                  {!isCollapsed && <ChevronDown className={`w-4 h-4 text-[#94A3B8] transition-transform duration-300 ${showAjustes ? 'rotate-180' : ''}`} />}
                 </button>
                 
                 {showAjustes && !isCollapsed && (
-                  <div className="mt-1 pl-12 flex flex-col space-y-1 animate-fade-in">
-                    <button onClick={() => intentarNavegar('ajustes-exportadoras')} className={`text-left text-sm py-2 px-3 rounded-lg transition-colors ${currentView === 'ajustes-exportadoras' ? 'text-[#E96008] font-bold bg-orange-50' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'}`}>Exportadoras</button>
-                    <button onClick={() => intentarNavegar('ajustes-variedades')} className={`text-left text-sm py-2 px-3 rounded-lg transition-colors ${currentView === 'ajustes-variedades' ? 'text-[#E96008] font-bold bg-orange-50' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'}`}>Variedades</button>
-                    <button onClick={() => intentarNavegar('ajustes-huertos')} className={`text-left text-sm py-2 px-3 rounded-lg transition-colors ${currentView === 'ajustes-huertos' ? 'text-[#E96008] font-bold bg-orange-50' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'}`}>Productores/Huertos</button>
-                    <button onClick={() => intentarNavegar('ajustes-parametros')} className={`text-left text-sm py-2 px-3 rounded-lg transition-colors ${currentView === 'ajustes-parametros' ? 'text-[#E96008] font-bold bg-orange-50' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'}`}>Parámetros Calificación</button>
-                    <button onClick={() => intentarNavegar('ajustes-usuarios')} className={`text-left text-sm py-2 px-3 rounded-lg transition-colors ${currentView === 'ajustes-usuarios' ? 'text-[#E96008] font-bold bg-orange-50' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'}`}>
-                       Usuarios
-                    </button>
+                  <div className="mt-1 flex flex-col space-y-1 animate-fade-in">
+                    {['exportadoras', 'variedades', 'huertos', 'parametros', 'usuarios'].map(item => (
+                      <button 
+                        key={item}
+                        onClick={() => intentarNavegar(`ajustes-${item}`)} 
+                        className={`group w-full text-left py-2 pr-3 rounded-lg transition-all duration-200 font-medium text-[13px] ${currentView === `ajustes-${item}` ? 'bg-[#F8FAFC] pl-[40px] text-[#0F172A]' : 'pl-[36px] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] hover:pl-[40px]'}`}
+                      >
+                        {item === 'huertos' ? 'Productores/Huertos' : item === 'parametros' ? 'Parámetros Calificación' : item.charAt(0).toUpperCase() + item.slice(1)}
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>
@@ -575,20 +633,21 @@ export default function App() {
           )}
         </nav>
         
-        <div className="p-3 border-t border-slate-100 bg-slate-50/50">
+        <div className="p-3 border-t border-[#F1F5F9] bg-[#F8FAFC]">
           <div className={`flex items-center ${isCollapsed ? 'justify-center mb-3' : 'gap-3 mb-4 px-2'}`}>
-            <div className="w-10 h-10 rounded-full bg-white border border-slate-200 flex items-center justify-center text-slate-600 shadow-sm shrink-0"><User className="w-5 h-5" /></div>
+            <div className="w-10 h-10 rounded-full bg-[#FFFFFF] border border-[#E2E8F0] flex items-center justify-center text-[#475569] shadow-sm shrink-0"><User className="w-5 h-5" /></div>
             {!isCollapsed && (
               <div className="overflow-hidden">
-                <p className="text-slate-800 text-sm font-bold capitalize truncate">{user.username}</p>
-                <p className="text-[10px] text-slate-500 uppercase font-black tracking-wider">
+                <p className="text-[#0F172A] text-[14px] font-semibold capitalize truncate">{user.username}</p>
+                <p className="text-[10px] text-[#64748B] uppercase font-bold tracking-[0.06em]">
                   {user.role === 'admin' ? 'Administrador' : user.role === 'qc' ? 'Control Calidad' : 'Gerencia'}
                 </p>
               </div>
             )}
           </div>
-          <button onClick={handleLogout} className={`w-full flex items-center justify-center ${isCollapsed ? 'p-2.5' : 'gap-2 py-2.5'} bg-white border border-slate-200 hover:border-red-200 hover:bg-red-50 text-slate-600 hover:text-red-600 rounded-lg transition-colors text-sm font-bold shadow-sm`}>
-            <LogOut className="w-4 h-4 shrink-0" />{!isCollapsed && <span>Cerrar Sesión</span>}
+          <button onClick={handleLogout} className={`group w-full flex items-center justify-center ${isCollapsed ? 'p-2.5' : 'gap-2 py-2.5 px-3.5'} bg-[#FFFFFF] border border-[#E2E8F0] hover:border-[#FECACA] hover:bg-[#FEF2F2] text-[#334155] hover:text-[#DC2626] rounded-[12px] transition-all duration-200 text-[13px] font-semibold hover:shadow-[0_2px_6px_-1px_rgba(239,68,68,0.1)] active:scale-[0.98]`}>
+            <LogOut className="w-4 h-4 shrink-0 group-hover:translate-x-[3px] transition-transform duration-200" />
+            {!isCollapsed && <span>Cerrar Sesión</span>}
           </button>
         </div>
       </aside>

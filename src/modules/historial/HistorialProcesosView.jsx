@@ -171,7 +171,10 @@ export default function HistorialProcesosView({ onVerResumen, userRole }) {
     const califLetter = pCal <= 5 ? 'A' : pCal <= 10 ? 'B' : 'C';
     const califNum = pCond <= 5 ? '1' : pCond <= 10 ? '2' : '3';
     const nota = totalFrutos ? `${califLetter}${califNum}` : '-';
-    const estado = totalFrutos ? ((califLetter === 'C' || califNum === '3') ? 'Objetado' : 'Aprobado') : 'Aprobado';
+    
+    // 🔥 LÓGICA MEJORADA: Si el proceso está "En curso" en DB, respetamos ese estado.
+    const estadoCalculado = totalFrutos ? ((califLetter === 'C' || califNum === '3') ? 'Objetado' : 'Aprobado') : 'Aprobado';
+    const estadoFinal = proceso.estado === 'En curso' ? 'En curso' : estadoCalculado;
 
     const promLight = countBrixLight ? (sumBrixLight / countBrixLight).toFixed(1).replace('.', ',') : '0,0';
     const promDark = countBrixDark ? (sumBrixDark / countBrixDark).toFixed(1).replace('.', ',') : '0,0';
@@ -182,7 +185,7 @@ export default function HistorialProcesosView({ onVerResumen, userRole }) {
       pCal: pCal.toFixed(1),
       pCond: pCond.toFixed(1),
       nota,
-      estado,
+      estado: estadoFinal,
       promLight,
       promDark,
       acumuladoFrutos: totalFrutos
@@ -492,7 +495,7 @@ export default function HistorialProcesosView({ onVerResumen, userRole }) {
                   : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
                 }`}
               >
-                <Filter className="w-5 h-5" /> Filteros
+                <Filter className="w-5 h-5" /> Filtros
               </button>
             </div>
 
@@ -546,24 +549,30 @@ export default function HistorialProcesosView({ onVerResumen, userRole }) {
                       const metricas = calcularMetricas(proc);
                       const isSelected = procesoSeleccionado?.id === proc.id;
                       const fechaData = obtenerFechaProceso(proc);
+                      
+                      // 🔥 LÓGICA DE BLOQUEO SI ESTÁ EN CURSO
+                      const isEnCurso = metricas.estado === 'En curso';
 
                       return (
                         <tr key={proc.id || proc.numProceso} onClick={() => setProcesoSeleccionado(proc)} className={`cursor-pointer transition-colors ${isSelected ? 'bg-orange-50/60' : 'hover:bg-slate-50/80'}`}>
                           
                           <td className="py-4 px-6">
                             <div className="flex items-center justify-center gap-3 w-max mx-auto">
-                              {/* Botón Ojo Moderno y Minimalista */}
+                              {/* Botón Ojo Moderno: DESHABILITADO SI ESTÁ EN CURSO */}
                               <div className="relative group">
                                 <button 
-                                  onClick={(e) => { e.stopPropagation(); abrirVistaPrevia(proc.id); }} 
-                                  disabled={cargandoVistaPreviaId === proc.id}
-                                  className="p-1.5 text-slate-400 hover:text-[#E96008] bg-white hover:bg-orange-50/80 border border-slate-200/60 hover:border-orange-200 rounded-lg shadow-sm transition-all disabled:opacity-50 focus:outline-none"
+                                  onClick={(e) => { 
+                                    e.stopPropagation(); 
+                                    if (!isEnCurso) abrirVistaPrevia(proc.id); 
+                                  }} 
+                                  disabled={cargandoVistaPreviaId === proc.id || isEnCurso}
+                                  className={`p-1.5 rounded-lg shadow-sm transition-all focus:outline-none border ${isEnCurso ? 'bg-slate-50 text-slate-300 border-slate-200 cursor-not-allowed' : 'text-slate-400 hover:text-[#E96008] bg-white hover:bg-orange-50/80 border-slate-200/60 hover:border-orange-200 disabled:opacity-50'}`}
                                 >
                                   <Eye className="w-4 h-4" />
                                 </button>
                                 {/* Tooltip Moderno */}
                                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max px-2.5 py-1.5 bg-slate-800 text-white text-[10px] font-bold rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none shadow-xl z-50">
-                                  Ver resumen
+                                  {isEnCurso ? 'No disponible (En curso)' : 'Ver resumen'}
                                   <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-[1px] border-4 border-transparent border-t-slate-800"></div>
                                 </div>
                               </div>
@@ -576,13 +585,27 @@ export default function HistorialProcesosView({ onVerResumen, userRole }) {
                             </div>
                           </td>
 
-                          <td className="py-4 px-6 text-center font-bold text-slate-800">{proc.numProceso}</td>
+                          {/* 🔥 NÚMERO DE PROCESO Y BADGE "EN CURSO" */}
+                          <td className="py-4 px-6 text-center">
+                            <div className="flex flex-col items-center justify-center">
+                              <span className="font-bold text-slate-800 text-[14px]">{proc.numProceso}</span>
+                              {isEnCurso && (
+                                <span className="mt-1 flex items-center gap-1.5 bg-[#eff6ff] text-[#2563eb] border border-[#bfdbfe] px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider shadow-sm">
+                                  <span className="w-1.5 h-1.5 bg-[#3b82f6] rounded-full animate-pulse"></span>
+                                  En Curso
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          
                           <td className="py-4 px-6 font-semibold text-slate-600">{proc.csg || '-'}</td>
                           
                           <td className="py-4 px-6 font-bold text-slate-800 uppercase">{proc.huerto || proc.productor || '-'}</td>
                           
                           <td className="py-4 px-6"><span className="bg-purple-100 text-purple-600 font-bold px-3 py-1 rounded-full text-xs">{proc.variedad || '-'}</span></td>
+                          
                           <td className="py-4 px-6 text-center font-bold text-slate-700">{proc.cajas ? proc.cajas.length : 0}</td>
+                          
                           <td className="py-4 px-6 text-center">
                             <div className="flex flex-col items-center">
                               <span className="font-bold text-slate-800 text-xs mb-1">{metricas.pExp}%</span>
@@ -591,32 +614,63 @@ export default function HistorialProcesosView({ onVerResumen, userRole }) {
                               </div>
                             </div>
                           </td>
+                          
                           <td className="py-4 px-6 text-center">
-                            <span className={`px-2.5 py-1 rounded-md text-xs font-black ${metricas.nota.includes('C') || metricas.nota.includes('3') ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                              {metricas.nota}
-                            </span>
+                            {isEnCurso ? (
+                              <span className="text-slate-400 font-medium text-xs italic">-</span>
+                            ) : (
+                              <span className={`px-2.5 py-1 rounded-md text-xs font-black ${metricas.nota.includes('C') || metricas.nota.includes('3') ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                {metricas.nota}
+                              </span>
+                            )}
                           </td>
                           
                           <td className="py-4 px-6 text-right relative">
                             <button onClick={(e) => { e.stopPropagation(); setMenuProcesoAbiertoId(menuProcesoAbiertoId === proc.id ? null : proc.id); }} className="p-1.5 hover:bg-slate-200/60 rounded-full text-slate-400 focus:outline-none" title="Opciones del proceso">
                               <MoreVertical className="w-4 h-4" />
                             </button>
+                            
+                            {/* 🔥 MENÚ DE OPCIONES DESPLEGABLE CON BLOQUEO */}
                             {menuProcesoAbiertoId === proc.id && (
-                              <div className="absolute right-6 top-10 w-52 bg-white border border-slate-200 shadow-xl rounded-2xl overflow-hidden z-30 flex flex-col animate-fade-in text-left divide-y divide-slate-100" onClick={(e) => e.stopPropagation()}>
+                              <div className="absolute right-6 top-10 w-56 bg-white border border-slate-200 shadow-xl rounded-2xl overflow-hidden z-30 flex flex-col animate-fade-in text-left divide-y divide-slate-100" onClick={(e) => e.stopPropagation()}>
                                 
                                 {userRole !== 'gerencia' && (
-                                  <button onClick={() => abrirEdicionProceso(proc)} className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-slate-50 text-xs font-bold text-slate-700 transition-colors">
-                                    <Edit3 className="w-4 h-4 text-blue-600" /><span>Editar proceso</span>
+                                  <button 
+                                    onClick={() => !isEnCurso && abrirEdicionProceso(proc)} 
+                                    disabled={isEnCurso}
+                                    className={`w-full flex items-center gap-3 px-4 py-3.5 text-xs font-bold transition-colors ${isEnCurso ? 'opacity-50 cursor-not-allowed bg-slate-50' : 'hover:bg-slate-50 text-slate-700'}`}
+                                  >
+                                    <Edit3 className={`w-4 h-4 ${isEnCurso ? 'text-slate-400' : 'text-blue-600'}`} />
+                                    <div className="flex flex-col text-left">
+                                      <span className={isEnCurso ? 'text-slate-500' : ''}>Editar proceso</span>
+                                      {isEnCurso && <span className="text-[9px] font-bold text-[#e11d48] uppercase mt-0.5">Bloqueado (En curso)</span>}
+                                    </div>
                                   </button>
                                 )}
 
-                                <button onClick={() => descargarPDF(proc.id)} disabled={generandoReporteId === proc.id} className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-green-50 text-xs font-bold text-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                                  <Download className="w-4 h-4 text-green-600" /><span>{generandoReporteId === proc.id ? 'Generando...' : 'Descargar Informe PDF'}</span>
+                                <button 
+                                  onClick={() => !isEnCurso && descargarPDF(proc.id)} 
+                                  disabled={generandoReporteId === proc.id || isEnCurso} 
+                                  className={`w-full flex items-center gap-3 px-4 py-3.5 text-xs font-bold transition-colors ${isEnCurso ? 'opacity-50 cursor-not-allowed bg-slate-50' : 'hover:bg-green-50 text-slate-700 disabled:opacity-50 disabled:cursor-not-allowed'}`}
+                                >
+                                  <Download className={`w-4 h-4 ${isEnCurso ? 'text-slate-400' : 'text-green-600'}`} />
+                                  <div className="flex flex-col text-left">
+                                    <span className={isEnCurso ? 'text-slate-500' : ''}>{generandoReporteId === proc.id ? 'Generando...' : 'Descargar Informe PDF'}</span>
+                                    {isEnCurso && <span className="text-[9px] font-bold text-[#e11d48] uppercase mt-0.5">Cerrar para descargar</span>}
+                                  </div>
                                 </button>
 
                                 {userRole === 'admin' && (
-                                  <button onClick={() => solicitarEliminarProceso(proc)} className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-red-50 text-xs font-bold text-red-600 transition-colors">
-                                    <Trash2 className="w-4 h-4 text-red-600" /><span>Eliminar proceso</span>
+                                  <button 
+                                    onClick={() => !isEnCurso && solicitarEliminarProceso(proc)} 
+                                    disabled={isEnCurso}
+                                    className={`w-full flex items-center gap-3 px-4 py-3.5 text-xs font-bold transition-colors ${isEnCurso ? 'opacity-50 cursor-not-allowed bg-slate-50' : 'hover:bg-red-50 text-red-600'}`}
+                                  >
+                                    <Trash2 className={`w-4 h-4 ${isEnCurso ? 'text-slate-400' : 'text-red-600'}`} />
+                                    <div className="flex flex-col text-left">
+                                      <span className={isEnCurso ? 'text-slate-500' : ''}>Eliminar proceso</span>
+                                      {isEnCurso && <span className="text-[9px] font-bold text-[#e11d48] uppercase mt-0.5">Bloqueado (En curso)</span>}
+                                    </div>
                                   </button>
                                 )}
                               </div>
@@ -659,9 +713,19 @@ export default function HistorialProcesosView({ onVerResumen, userRole }) {
           <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 animate-fade-in">
             <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden relative">
               <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100 bg-white z-10">
-                <div><h3 className="font-black text-slate-900 text-lg">Vista Previa del Informe</h3><p className="text-xs text-slate-500">Proceso N° {datosVistaPrevia.numProceso || datosVistaPrevia.id}</p></div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-lg flex items-center gap-2">
+                    Vista Previa del Informe
+                    {datosVistaPrevia.estado === 'En curso' && (
+                      <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] uppercase font-bold animate-pulse">En curso</span>
+                    )}
+                  </h3>
+                  <p className="text-xs text-slate-500">Proceso N° {datosVistaPrevia.numProceso || datosVistaPrevia.id}</p>
+                </div>
                 <div className="flex items-center gap-3">
-                  <button onClick={() => descargarPDF(datosVistaPrevia.id || datosVistaPrevia._id)} disabled={generandoReporteId === (datosVistaPrevia.id || datosVistaPrevia._id)} className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-sm transition-colors disabled:opacity-50"><Download className="w-4 h-4" /> {generandoReporteId === (datosVistaPrevia.id || datosVistaPrevia._id) ? 'Generando...' : 'Descargar PDF'}</button>
+                  <button onClick={() => descargarPDF(datosVistaPrevia.id || datosVistaPrevia._id)} disabled={generandoReporteId === (datosVistaPrevia.id || datosVistaPrevia._id) || datosVistaPrevia.estado === 'En curso'} className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-sm transition-colors disabled:opacity-50">
+                    <Download className="w-4 h-4" /> {generandoReporteId === (datosVistaPrevia.id || datosVistaPrevia._id) ? 'Generando...' : 'Descargar PDF'}
+                  </button>
                   <button onClick={() => setDatosVistaPrevia(null)} className="p-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"><X className="w-5 h-5" /></button>
                 </div>
               </div>

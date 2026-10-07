@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { User, Lock, EyeOff, Eye, Building2, ShieldCheck } from 'lucide-react';
+import { User, Lock, EyeOff, Eye, Building2, ShieldCheck, Check } from 'lucide-react';
 
 export default function Login({ onLogin }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [recordarSesion, setRecordarSesion] = useState(false);
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(false);
 
@@ -99,8 +100,8 @@ export default function Login({ onLogin }) {
         </div>
       </div>
 
-      {/* TARJETA DE LOGIN */}
-      <div className="relative z-10 bg-white w-full max-w-[420px] rounded-[2.5rem] shadow-[0_20px_50px_rgba(0,0,0,0.05)] p-10 mx-4">
+      {/* TARJETA DE LOGIN (Glassmorphism sutil) */}
+      <div className="relative z-10 bg-white/95 backdrop-blur-xl w-full max-w-[420px] rounded-[2.5rem] shadow-[0_25px_50px_-12px_rgba(0,0,0,0.08)] border border-white/60 p-10 mx-4">
         
         {/* Encabezado: Logo y Título */}
         <div className="flex flex-col items-center mb-8">
@@ -111,7 +112,7 @@ export default function Login({ onLogin }) {
             onError={(e) => { e.target.style.display = 'none'; }}
           />
           <h1 className="text-[26px] font-light text-slate-800 tracking-wide">
-            Qc Evap <span className="font-extralight text-slate-500">+</span>
+            Qc Evap <span className="font-semibold text-[#E96008]">+</span>
           </h1>
         </div>
 
@@ -119,37 +120,37 @@ export default function Login({ onLogin }) {
         <form onSubmit={handleLogin} className="space-y-4">
           
           {/* Input Usuario */}
-          <div className="relative">
+          <div className="relative group">
             <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-              <User className="h-[18px] w-[18px] text-slate-400" />
+              <User className="h-[18px] w-[18px] text-slate-400 group-focus-within:text-[#E96008] transition-colors duration-300" />
             </div>
             <input
               type="text"
-              placeholder="usuario"
+              placeholder="Usuario"
               autoCapitalize="none"
               autoCorrect="off"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full pl-11 pr-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-[14px] text-slate-700 placeholder-slate-400 focus:outline-none focus:border-[#E96008] focus:ring-1 focus:ring-[#E96008] transition-colors"
+              className="w-full pl-11 pr-4 py-3.5 bg-slate-50/50 hover:bg-slate-50 border border-slate-200/80 rounded-2xl text-[14px] font-medium text-slate-700 placeholder-slate-400 focus:bg-white focus:outline-none focus:border-[#E96008] focus:ring-4 focus:ring-[#E96008]/10 transition-all duration-300"
             />
           </div>
 
           {/* Input Contraseña */}
-          <div className="relative">
+          <div className="relative group">
             <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-              <Lock className="h-[18px] w-[18px] text-slate-400" />
+              <Lock className="h-[18px] w-[18px] text-slate-400 group-focus-within:text-[#E96008] transition-colors duration-300" />
             </div>
             <input
               type={showPassword ? "text" : "password"}
               placeholder="Contraseña"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full pl-11 pr-12 py-3.5 bg-white border border-slate-200 rounded-2xl text-[14px] text-slate-700 placeholder-slate-400 focus:outline-none focus:border-[#E96008] focus:ring-1 focus:ring-[#E96008] transition-colors"
+              className="w-full pl-11 pr-12 py-3.5 bg-slate-50/50 hover:bg-slate-50 border border-slate-200/80 rounded-2xl text-[14px] font-medium text-slate-700 placeholder-slate-400 focus:bg-white focus:outline-none focus:border-[#E96008] focus:ring-4 focus:ring-[#E96008]/10 transition-all duration-300"
             />
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-slate-600 focus:outline-none"
+              className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-[#E96008] focus:outline-none transition-colors"
             >
               {showPassword ? <Eye className="h-[18px] w-[18px]" /> : <EyeOff className="h-[18px] w-[18px]" />}
             </button>
@@ -158,28 +159,35 @@ export default function Login({ onLogin }) {
           {/* Input Planta / Ubicación */}
           <div className="relative">
             <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-              <Building2 className="h-[18px] w-[18px] text-slate-400" />
+              <Building2 className="h-[18px] w-[18px] text-slate-400 opacity-60" />
             </div>
             <input
               type="text"
               defaultValue="Maquehua"
               readOnly
-              className="w-full pl-11 pr-4 py-3.5 bg-white border border-slate-200 rounded-2xl text-[14px] text-slate-700 focus:outline-none cursor-default"
+              className="w-full pl-11 pr-4 py-3.5 bg-slate-100/60 border border-slate-200/50 rounded-2xl text-[14px] font-medium text-slate-500 focus:outline-none cursor-not-allowed select-none"
             />
           </div>
 
           {/* Error de validación */}
-          {error && <p className="text-red-500 text-[13px] text-center font-medium animate-pulse">{error}</p>}
+          {error && <p className="text-red-500 text-[13px] text-center font-bold bg-red-50 py-2 rounded-xl border border-red-100 animate-fade-in">{error}</p>}
 
           {/* Opciones extra */}
           <div className="flex items-center justify-between pt-1 pb-3">
             <label className="flex items-center gap-2 cursor-pointer group">
-              <div className="w-[16px] h-[16px] border border-slate-300 rounded flex items-center justify-center group-hover:border-[#E96008] transition-colors">
-                <input type="checkbox" className="hidden" />
+              <div className={`w-[16px] h-[16px] border rounded flex items-center justify-center transition-all duration-200 ${recordarSesion ? 'bg-[#E96008] border-[#E96008]' : 'bg-white border-slate-300 group-hover:border-[#E96008]'}`}>
+                <Check className={`w-3 h-3 text-white transition-opacity ${recordarSesion ? 'opacity-100' : 'opacity-0'}`} strokeWidth={3} />
               </div>
-              <span className="text-[12px] text-slate-500">Recordar sesión</span>
+              {/* Ocultamos el checkbox real */}
+              <input 
+                type="checkbox" 
+                className="hidden" 
+                checked={recordarSesion} 
+                onChange={() => setRecordarSesion(!recordarSesion)} 
+              />
+              <span className="text-[12px] font-medium text-slate-500 group-hover:text-slate-700 transition-colors">Recordar sesión</span>
             </label>
-            <a href="#" className="text-[12px] text-[#E96008] hover:text-[#C44D06] transition-colors">
+            <a href="#" className="text-[12px] font-bold text-[#E96008] hover:text-[#C44D06] transition-colors">
               ¿Olvidaste tu contraseña?
             </a>
           </div>
@@ -188,29 +196,37 @@ export default function Login({ onLogin }) {
           <button
             type="submit"
             disabled={cargando}
-            className="w-full bg-[#E96008] hover:bg-[#D45607] disabled:opacity-60 text-white text-[15px] font-bold py-3.5 rounded-full shadow-lg shadow-orange-500/20 active:scale-[0.98] transition-all flex items-center justify-center"
+            className="w-full bg-gradient-to-r from-[#E96008] to-[#d95604] hover:shadow-lg hover:shadow-[#E96008]/25 hover:-translate-y-0.5 disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:shadow-none text-white text-[15px] font-bold py-3.5 rounded-full active:scale-[0.98] transition-all duration-300 flex items-center justify-center"
           >
-            {cargando ? 'Iniciando sesión...' : 'Ingresar'}
+            {cargando ? (
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Iniciando sesión...
+              </span>
+            ) : 'Ingresar'}
           </button>
         </form>
 
         {/* Divisor con punto central */}
-        <div className="mt-8 flex items-center justify-center gap-3">
-          <div className="h-px bg-slate-100 flex-1"></div>
-          <div className="w-1.5 h-1.5 rounded-full border-2 border-slate-200 bg-white"></div>
-          <div className="h-px bg-slate-100 flex-1"></div>
+        <div className="mt-8 flex items-center justify-center gap-3 opacity-60">
+          <div className="h-px bg-slate-200 flex-1"></div>
+          <div className="w-1.5 h-1.5 rounded-full border-2 border-slate-300 bg-white"></div>
+          <div className="h-px bg-slate-200 flex-1"></div>
         </div>
 
         {/* Pie de tarjeta */}
         <div className="mt-6 flex items-center justify-center gap-2 text-slate-400">
-          <ShieldCheck className="h-4 w-4" strokeWidth={1.5} />
-          <span className="text-[12px] font-medium">Acceso seguro</span>
+          <ShieldCheck className="h-4 w-4" strokeWidth={2} />
+          <span className="text-[12px] font-bold tracking-wide">Acceso Seguro</span>
         </div>
 
       </div>
 
       {/* INDICADOR DE VERSIÓN (Esquina inferior derecha) */}
-      <div className="absolute bottom-3 right-4 z-20 text-[10px] text-slate-400/80 font-bold tracking-widest uppercase select-none">
+      <div className="absolute bottom-3 right-4 z-20 text-[10px] text-slate-400/80 font-black tracking-widest uppercase select-none">
         beta 1.02
       </div>
 
