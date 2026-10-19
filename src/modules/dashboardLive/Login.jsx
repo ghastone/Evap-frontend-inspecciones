@@ -227,7 +227,7 @@ export default function Login({ onLogin }) {
 
       {/* INDICADOR DE VERSIÓN (Esquina inferior derecha) */}
       <div className="absolute bottom-3 right-4 z-20 text-[10px] text-slate-400/80 font-black tracking-widest uppercase select-none">
-        beta 1.02
+        beta 1.03
       </div>
 
     </div>
