@@ -10,16 +10,11 @@ export default function GestionUsuarios() {
   const [showModal, setShowModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   
-  // Función para obtener los permisos predeterminados según el rol
   const getPermisosPorDefecto = (role) => {
-    if (role === 'admin') {
-      return { crear_proceso: true, editar_informes: true, ver_dashboard: true, ver_historial: true, gestionar_ajustes: true };
-    }
-    if (role === 'gerencia') {
-      return { crear_proceso: false, editar_informes: false, ver_dashboard: true, ver_historial: true, gestionar_ajustes: false };
-    }
-    // Control Calidad (QC) por defecto
-    return { crear_proceso: true, editar_informes: true, ver_dashboard: true, ver_historial: true, gestionar_ajustes: false };
+    if (role === 'admin') return { crear_proceso: true, editar_informes: true, ver_dashboard: true, ver_historial: true, acceder_digitacion: true, eliminar_procesos: true, gestionar_ajustes: true };
+    if (role === 'qc_avanzado') return { crear_proceso: true, editar_informes: true, ver_dashboard: true, ver_historial: true, acceder_digitacion: true, eliminar_procesos: true, gestionar_ajustes: false };
+    if (role === 'gerencia') return { crear_proceso: false, editar_informes: false, ver_dashboard: true, ver_historial: true, acceder_digitacion: false, eliminar_procesos: false, gestionar_ajustes: false };
+    return { crear_proceso: true, editar_informes: true, ver_dashboard: true, ver_historial: true, acceder_digitacion: false, eliminar_procesos: false, gestionar_ajustes: false };
   };
 
   const [formData, setFormData] = useState({
@@ -97,8 +92,7 @@ export default function GestionUsuarios() {
       username: user.username, 
       password: '', 
       role: user.role,
-      // Si el usuario ya tiene permisos guardados en BD, los usamos, sino usamos los por defecto de su rol
-      permisos: user.permisos || getPermisosPorDefecto(user.role)
+      permisos: { ...getPermisosPorDefecto(user.role), ...(user.permisos || {}) }
     });
     setShowModal(true);
   };
@@ -165,7 +159,8 @@ export default function GestionUsuarios() {
 
   const formatRole = (role) => {
     if (role === 'admin') return <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-bold border border-purple-200">Administrador</span>;
-    if (role === 'qc') return <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold border border-blue-200">Control Calidad</span>;
+    if (role === 'qc_avanzado') return <span className="px-3 py-1 bg-orange-100 text-orange-700 rounded-full text-xs font-bold border border-orange-200">Control Calidad (QC) avanzado</span>;
+    if (role === 'qc') return <span className="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-bold border border-blue-200">Control Calidad (QC)</span>;
     if (role === 'gerencia') return <span className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold border border-emerald-200">Gerencia</span>;
     return role;
   };
@@ -330,6 +325,14 @@ export default function GestionUsuarios() {
                       </div>
                     </label>
                     
+                    <label className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${formData.role === 'qc_avanzado' ? 'border-orange-500 bg-orange-50' : 'border-slate-200 hover:bg-slate-50'}`}>
+                      <input type="radio" name="role" value="qc_avanzado" checked={formData.role === 'qc_avanzado'} onChange={handleRoleChange} className="w-4 h-4 text-orange-600 focus:ring-orange-500" />
+                      <div>
+                        <p className="font-bold text-sm text-slate-800">Control Calidad (QC) avanzado</p>
+                        <p className="text-[10px] text-slate-500 leading-tight">Incluye digitación y permiso para eliminar procesos.</p>
+                      </div>
+                    </label>
+
                     <label className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${formData.role === 'qc' ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:bg-slate-50'}`}>
                       <input type="radio" name="role" value="qc" checked={formData.role === 'qc'} onChange={handleRoleChange} className="w-4 h-4 text-blue-600 focus:ring-blue-500" />
                       <div>
@@ -373,9 +376,19 @@ export default function GestionUsuarios() {
                       <span className={`text-sm ${formData.permisos.ver_historial ? 'text-slate-800 font-medium' : 'text-slate-500'}`}>Puede acceder al Historial de procesos</span>
                     </button>
 
+                    <button type="button" onClick={() => togglePermiso('acceder_digitacion')} className="flex items-center w-full gap-3 text-left">
+                      {formData.permisos.acceder_digitacion ? <CheckSquare className="w-5 h-5 text-[#E96008] shrink-0" /> : <Square className="w-5 h-5 text-slate-300 shrink-0" />}
+                      <span className={`text-sm ${formData.permisos.acceder_digitacion ? 'text-slate-800 font-medium' : 'text-slate-500'}`}>Puede acceder a Digitación / Temperatura en línea</span>
+                    </button>
+
+                    <button type="button" onClick={() => togglePermiso('eliminar_procesos')} className="flex items-center w-full gap-3 text-left">
+                      {formData.permisos.eliminar_procesos ? <CheckSquare className="w-5 h-5 text-[#E96008] shrink-0" /> : <Square className="w-5 h-5 text-slate-300 shrink-0" />}
+                      <span className={`text-sm ${formData.permisos.eliminar_procesos ? 'text-slate-800 font-medium' : 'text-slate-500'}`}>Puede eliminar procesos</span>
+                    </button>
+
                     <button type="button" onClick={() => togglePermiso('gestionar_ajustes')} className="flex items-center w-full gap-3 text-left">
                       {formData.permisos.gestionar_ajustes ? <CheckSquare className="w-5 h-5 text-[#E96008] shrink-0" /> : <Square className="w-5 h-5 text-slate-300 shrink-0" />}
-                      <span className={`text-sm ${formData.permisos.gestionar_ajustes ? 'text-slate-800 font-medium' : 'text-slate-500'}`}>Acceso total a ajustes y eliminación de datos</span>
+                      <span className={`text-sm ${formData.permisos.gestionar_ajustes ? 'text-slate-800 font-medium' : 'text-slate-500'}`}>Acceso total a ajustes</span>
                     </button>
 
                   </div>

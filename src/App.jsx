@@ -3,42 +3,61 @@ import Login from './modules/dashboardLive/Login';
 import DashboardLiveView from './modules/dashboardLive/DashboardLiveView';
 import DashboardResumenDiario from './modules/dashboard/DashboardResumenDiario';
 import DashboardHistoricoTemporada from './modules/dashboard/DashboardHistorico';
-
 import NuevoProceso from './modules/inspeccion/NuevoProceso';
 import InspeccionModule from './modules/inspeccion/InspeccionModule';
-
+import TemperaturaLineaModule from './modules/digitacion/TemperaturaLineaModule';
 import HistorialProcesosView from './modules/historial/HistorialProcesosView';
 import GestionExportadoras from './modules/ajustes/GestionExportadoras';
 import GestionVariedades from './modules/ajustes/GestionVariedades';
 import TablaHuertos from './modules/ajustes/TablaHuertos';
 import ParametrosCalificacion from './modules/ajustes/ParametrosCalificacion';
-import GestionUsuarios from './modules/ajustes/GestionUsuarios'; 
-
-import { 
-  LogOut, PlusCircle, ClipboardList, LineChart, Settings, User, 
+import GestionUsuarios from './modules/ajustes/GestionUsuarios';
+import {
+  LogOut, PlusCircle, ClipboardList, LineChart, Settings, User, Thermometer,
   ChevronLeft, ChevronRight, ChevronDown, X
 } from 'lucide-react';
 
+const PERMISOS_POR_ROL={
+  admin:{crear_proceso:true,editar_informes:true,ver_dashboard:true,ver_historial:true,acceder_digitacion:true,eliminar_procesos:true,gestionar_ajustes:true},
+  qc_avanzado:{crear_proceso:true,editar_informes:true,ver_dashboard:true,ver_historial:true,acceder_digitacion:true,eliminar_procesos:true,gestionar_ajustes:false},
+  qc:{crear_proceso:true,editar_informes:true,ver_dashboard:true,ver_historial:true,acceder_digitacion:false,eliminar_procesos:false,gestionar_ajustes:false},
+  gerencia:{crear_proceso:false,editar_informes:false,ver_dashboard:true,ver_historial:true,acceder_digitacion:false,eliminar_procesos:false,gestionar_ajustes:false}
+};
+const tienePermiso=(usuario,llave)=>{
+  if(!usuario)return false;
+  if(usuario.role==='admin')return true;
+  if(usuario.permisos&&Object.prototype.hasOwnProperty.call(usuario.permisos,llave))return usuario.permisos[llave]===true;
+  return PERMISOS_POR_ROL[usuario.role]?.[llave]===true;
+};
+const nombreRol=role=>role==='admin'?'Administrador':role==='qc_avanzado'?'Control Calidad (QC) avanzado':role==='qc'?'Control Calidad (QC)':'Gerencia';
 export default function App() {
   const [user, setUser] = useState(() => {
     const savedUser = localStorage.getItem('qc_user_session');
     return savedUser ? JSON.parse(savedUser) : null;
   });
-  
+  const puedeCrearProceso=tienePermiso(user,'crear_proceso');
+  const puedeEditarInformes=tienePermiso(user,'editar_informes');
+  const puedeVerDashboard=tienePermiso(user,'ver_dashboard');
+  const puedeVerHistorial=tienePermiso(user,'ver_historial');
+  const puedeDigitacion=tienePermiso(user,'acceder_digitacion');
+  const puedeEliminarProcesos=tienePermiso(user,'eliminar_procesos');
+  const puedeGestionarAjustes=tienePermiso(user,'gestionar_ajustes');
   // ================= MEMORIA PERSISTENTE DE RUTAS =================
   const [currentView, setCurrentView] = useState(() => {
     return localStorage.getItem('qc_current_view') || 'home';
   });
-
+  useEffect(()=>{
+    if(!user)return;
+    const noPermitida=(currentView==='nuevo-proceso'&&!puedeCrearProceso)||(currentView==='historial'&&!puedeVerHistorial)||(currentView.startsWith('dashboard_')&&!puedeVerDashboard)||(currentView==='digitacion-temperatura'&&!puedeDigitacion)||(currentView.startsWith('ajustes-')&&!puedeGestionarAjustes);
+    if(noPermitida)setCurrentView('home');
+  },[user,currentView,puedeCrearProceso,puedeVerHistorial,puedeVerDashboard,puedeDigitacion,puedeGestionarAjustes]);
   const [isCollapsed, setIsCollapsed] = useState(() => {
     return localStorage.getItem('qc_is_collapsed') === 'true';
   });
-
   const [datosProcesoActivo, setDatosProcesoActivo] = useState(() => {
     const saved = localStorage.getItem('inspeccionActiva');
     return saved ? JSON.parse(saved) : null;
   });
-
   useEffect(() => { localStorage.setItem('qc_current_view', currentView); }, [currentView]);
   useEffect(() => { localStorage.setItem('qc_is_collapsed', isCollapsed); }, [isCollapsed]);
   useEffect(() => {
@@ -46,23 +65,18 @@ export default function App() {
     else localStorage.removeItem('inspeccionActiva');
   }, [datosProcesoActivo]);
   // ================================================================
-
   const [showAjustes, setShowAjustes] = useState(false);
   const [dashboardsAbierto, setDashboardsAbierto] = useState(true);
   const [showDrawer, setShowDrawer] = useState(false);
-
   // ================= ESTADOS INACTIVIDAD =================
   const [mostrarAlertaInactividad, setMostrarAlertaInactividad] = useState(false);
   const timerInactividad = useRef(null);
   const timerCierre = useRef(null);
-
-  const TIEMPO_ALERTA = 28 * 60 * 1000; 
+  const TIEMPO_ALERTA = 28 * 60 * 1000;
   const TIEMPO_CIERRE_FINAL = 2 * 60 * 1000;
-
   const resetearTemporizadores = () => {
     if (timerInactividad.current) clearTimeout(timerInactividad.current);
     if (timerCierre.current) clearTimeout(timerCierre.current);
-
     if (user) {
       timerInactividad.current = setTimeout(() => {
         setMostrarAlertaInactividad(true);
@@ -72,37 +86,29 @@ export default function App() {
       }, TIEMPO_ALERTA);
     }
   };
-
   const forzarCierrePorInactividad = () => {
     localStorage.clear();
     sessionStorage.clear();
-    
-    const API_URL = window.location.hostname.includes('goldanda.cl')     
-      ? 'https://evap.maq.goldanda.cl' 
+    const API_URL = window.location.hostname.includes('goldanda.cl')
+      ? 'https://evap.maq.goldanda.cl'
       : `http://${window.location.hostname || 'localhost'}:3001`;
-      
     fetch(`${API_URL}/api/live`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({})
     }).catch(err => console.log('Live limpiado (Inactividad)', err));
-
     setUser(null);
     setMostrarAlertaInactividad(false);
     setCurrentView('home');
     setDatosProcesoActivo(null);
-    
     alert("Tu sesión se ha cerrado por inactividad prolongada por tu seguridad.");
   };
-
   const mantenerSesionViva = () => {
     setMostrarAlertaInactividad(false);
     resetearTemporizadores();
   };
-
   useEffect(() => {
     if (!user) return;
-
     let ultimoMovimiento = Date.now();
     const handleActividad = () => {
       const ahora = Date.now();
@@ -111,35 +117,28 @@ export default function App() {
         resetearTemporizadores();
       }
     };
-
     const eventos = ['mousemove', 'keydown', 'click', 'touchstart', 'scroll'];
     eventos.forEach(evt => window.addEventListener(evt, handleActividad));
-    
     resetearTemporizadores();
-
     return () => {
       eventos.forEach(evt => window.removeEventListener(evt, handleActividad));
       if (timerInactividad.current) clearTimeout(timerInactividad.current);
       if (timerCierre.current) clearTimeout(timerCierre.current);
     };
   }, [user, mostrarAlertaInactividad]);
-
   // ================= ESTADOS INTERCEPTOR DE NAVEGACIÓN =================
   const [vistaPendiente, setVistaPendiente] = useState(null);
   const [mostrarAlertaSalida, setMostrarAlertaSalida] = useState(false);
+  const [mostrarConfirmacionLogout, setMostrarConfirmacionLogout] = useState(false);
   const vistasProtegidas = ['nuevo-proceso', 'inspeccion'];
-
   const intentarNavegar = (nuevaVista) => {
     if (nuevaVista === currentView) return;
-    
     setShowDrawer(false);
-
     if (['historial', 'ajustes-exportadoras', 'ajustes-variedades', 'ajustes-huertos', 'ajustes-parametros', 'ajustes-usuarios'].includes(nuevaVista)) {
       setIsCollapsed(true);
     } else if (nuevaVista === 'nuevo-proceso' || nuevaVista === 'home') {
       setIsCollapsed(false);
     }
-
     if (vistasProtegidas.includes(currentView)) {
       setVistaPendiente(nuevaVista);
       setMostrarAlertaSalida(true);
@@ -147,118 +146,95 @@ export default function App() {
       setCurrentView(nuevaVista);
     }
   };
-
   const confirmarSalida = () => {
     setCurrentView(vistaPendiente);
-    
     if (['historial', 'ajustes-exportadoras', 'ajustes-variedades', 'ajustes-huertos', 'ajustes-parametros', 'ajustes-usuarios'].includes(vistaPendiente)) {
       setIsCollapsed(true);
     } else if (vistaPendiente === 'nuevo-proceso' || vistaPendiente === 'home') {
       setIsCollapsed(false);
     }
-
     setDatosProcesoActivo(null);
     setMostrarAlertaSalida(false);
     setVistaPendiente(null);
-
-    localStorage.removeItem('dashboardLive'); 
+    localStorage.removeItem('dashboardLive');
     localStorage.removeItem('inspeccionActiva');
     sessionStorage.clear();
-
-    const API_URL = window.location.hostname.includes('goldanda.cl') 
-      ? 'https://evap.maq.goldanda.cl' 
+    const API_URL = window.location.hostname.includes('goldanda.cl')
+      ? 'https://evap.maq.goldanda.cl'
       : `http://${window.location.hostname || 'localhost'}:3001`;
-
     fetch(`${API_URL}/api/live`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({})
     }).catch(err => console.log('Live limpiado (Descarte)', err));
   };
-
   const cancelarSalida = () => {
     setMostrarAlertaSalida(false);
     setVistaPendiente(null);
   };
-
   const [dbData, setDbData] = useState({
     exportadoras: [],
     variedades: [],
     productores: [],
     procesosExistentes: []
   });
-
   const cargarDatosMaestros = async () => {
     try {
-      const API_URL = window.location.hostname.includes('goldanda.cl') 
-        ? 'https://evap.maq.goldanda.cl' 
+      const API_URL = window.location.hostname.includes('goldanda.cl')
+        ? 'https://evap.maq.goldanda.cl'
         : `http://${window.location.hostname || 'localhost'}:3001`;
-      
       const [expRes, varRes, hueRes, inspRes] = await Promise.all([
         fetch(`${API_URL}/api/exportadoras`),
         fetch(`${API_URL}/api/variedades`),
         fetch(`${API_URL}/api/huertos`),
         fetch(`${API_URL}/api/inspecciones`)
       ]);
-
       const exportadorasDB = await expRes.json();
       const variedadesDB = await varRes.json();
       const huertosDB = await hueRes.json();
       const inspeccionesDB = await inspRes.json();
-
       setDbData({
         exportadoras: Array.isArray(exportadorasDB) ? exportadorasDB.map(e => e.nombre) : [],
         variedades: Array.isArray(variedadesDB) ? variedadesDB.map(v => v.nombre) : [],
         productores: Array.isArray(huertosDB) ? huertosDB : [],
         procesosExistentes: Array.isArray(inspeccionesDB) ? inspeccionesDB.map(p => p.numProceso) : []
       });
-      
     } catch (error) {
       console.error("Error al cargar los datos maestros:", error);
     }
   };
-
   useEffect(() => {
     if (user) {
       cargarDatosMaestros();
     }
   }, [user]);
-
   const handleLogin = (userData) => {
     setUser(userData);
     localStorage.setItem('qc_user_session', JSON.stringify(userData));
     setCurrentView('home');
   };
-
-  const handleLogout = () => {
-    if (vistasProtegidas.includes(currentView)) {
-      if(!window.confirm('Tienes un proceso sin guardar. ¿Estás seguro de descartarlo y cerrar sesión?')) return;
-    } else {
-      if(!window.confirm('¿Estás seguro de cerrar sesión?')) return;
-    }
-    
-    localStorage.clear(); 
-    sessionStorage.clear();
-
-    const API_URL = window.location.hostname.includes('goldanda.cl') 
-     ? 'https://evap.maq.goldanda.cl' 
-     : `http://${window.location.hostname || 'localhost'}:3001`;
-      
-    fetch(`${API_URL}/api/live`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
-    }).catch(err => console.log('Live limpiado (Logout)', err));
-
-    setUser(null);
-    setCurrentView('home');
-    setIsCollapsed(false);
-    setShowAjustes(false);
-    setDashboardsAbierto(true);
-    setShowDrawer(false);
-    setDatosProcesoActivo(null);
+  const handleLogout = () => setMostrarConfirmacionLogout(true);
+  const confirmarLogout = () => {
+    setMostrarConfirmacionLogout(false); localStorage.clear(); sessionStorage.clear();
+    const API_URL=window.location.hostname.includes('goldanda.cl')?'https://evap.maq.goldanda.cl':`http://${window.location.hostname||'localhost'}:3001`;
+    fetch(`${API_URL}/api/live`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).catch(err=>console.log('Live limpiado (Logout)',err));
+    setUser(null); setCurrentView('home'); setIsCollapsed(false); setShowAjustes(false); setDashboardsAbierto(true); setShowDrawer(false); setDatosProcesoActivo(null);
   };
-
+  const ModalLogout = mostrarConfirmacionLogout ? (
+    <div className="fixed inset-0 z-[1100] bg-slate-900/45 backdrop-blur-[2px] flex items-center justify-center p-4 animate-fade-in">
+      <div className="w-full max-w-[380px] bg-white rounded-[22px] border border-slate-200 shadow-2xl overflow-hidden">
+        <div className="p-6">
+          <div className="w-11 h-11 rounded-xl bg-orange-50 text-[#E96008] flex items-center justify-center mb-4"><LogOut className="w-5 h-5" /></div>
+          <h3 className="text-[18px] font-black text-slate-900">Cerrar sesión</h3>
+          <p className="mt-1.5 text-[13px] leading-relaxed text-slate-500">{vistasProtegidas.includes(currentView)?'Tienes una inspección abierta. Al cerrar sesión se descartarán los cambios que no hayas guardado.':'¿Deseas cerrar tu sesión actual?'}</p>
+        </div>
+        <div className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex gap-3">
+          <button type="button" onClick={()=>setMostrarConfirmacionLogout(false)} className="flex-1 h-10 rounded-xl border border-slate-200 bg-white text-slate-600 text-[12px] font-bold hover:bg-slate-100 transition-colors">Cancelar</button>
+          <button type="button" onClick={confirmarLogout} className="flex-1 h-10 rounded-xl bg-[#E96008] hover:bg-[#D95707] text-white text-[12px] font-bold shadow-sm transition-colors">Cerrar sesión</button>
+        </div>
+      </div>
+    </div>
+  ) : null;
   const ModalAdvertencia = mostrarAlertaSalida ? (
     <div className="fixed inset-0 z-[999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
       <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl">
@@ -270,8 +246,8 @@ export default function App() {
           </div>
           <h3 className="text-lg font-black text-slate-900 mb-2">¿Seguro que deseas salir?</h3>
           <p className="text-sm text-slate-500 leading-relaxed">
-            Tienes datos en pantalla que no han sido guardados. Si sales ahora, 
-            <span className="font-bold text-slate-700"> todo el progreso se perderá </span> 
+            Tienes datos en pantalla que no han sido guardados. Si sales ahora,
+            <span className="font-bold text-slate-700"> todo el progreso se perderá </span>
             y no podrás recuperarlo.
           </p>
         </div>
@@ -286,7 +262,6 @@ export default function App() {
       </div>
     </div>
   ) : null;
-
   const ModalInactividad = mostrarAlertaInactividad ? (
     <div className="fixed inset-0 z-[1000] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
       <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl text-center">
@@ -309,16 +284,13 @@ export default function App() {
       </div>
     </div>
   ) : null;
-
   if (!user) {
     return <Login onLogin={handleLogin} />;
   }
-
   // Rutas que ocupan pantalla completa sin Sidebar tradicional (para móvil o procesos en vivo)
   if (['nuevo-proceso', 'inspeccion', 'dashboard_live', 'dashboard_resumen', 'dashboard_historico'].includes(currentView)) {
     return (
       <div className="w-screen h-screen overflow-hidden bg-slate-50 relative" style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
-        
         {/* ESTILOS DE ANIMACIÓN GLOBAL INYECTADOS */}
         <style>{`
           @keyframes ping-radar {
@@ -342,9 +314,8 @@ export default function App() {
             box-shadow: none;
           }
         `}</style>
-
-        {currentView === 'nuevo-proceso' && (
-          <NuevoProceso 
+        {currentView === 'nuevo-proceso' && puedeCrearProceso && (
+          <NuevoProceso
             exportadoras={dbData.exportadoras}
             productores={dbData.productores}
             variedades={dbData.variedades}
@@ -357,36 +328,34 @@ export default function App() {
           />
         )}
         {currentView === 'inspeccion' && datosProcesoActivo && (
-          <InspeccionModule 
+          <InspeccionModule
             datosProceso={datosProcesoActivo}
             onAbrirMenu={() => setShowDrawer(true)}
             onVolver={() => {
               setCurrentView('home');
               setIsCollapsed(false);
               setDatosProcesoActivo(null);
-            }} 
+            }}
             onFinishedInspection={(num) => {
-              localStorage.removeItem('dashboardLive'); 
+              localStorage.removeItem('dashboardLive');
               localStorage.removeItem('inspeccionActiva');
               sessionStorage.clear();
-              cargarDatosMaestros(); 
-              
+              cargarDatosMaestros();
               setCurrentView('historial');
               setIsCollapsed(true);
               setDatosProcesoActivo(null);
             }}
           />
         )}
-        {currentView === 'dashboard_live' && (
+        {currentView === 'dashboard_live' && puedeVerDashboard && (
           <DashboardLiveView onClose={() => intentarNavegar('home')} onAbrirMenu={() => setShowDrawer(true)} />
         )}
-        {currentView === 'dashboard_resumen' && (
+        {currentView === 'dashboard_resumen' && puedeVerDashboard && (
           <DashboardResumenDiario onClose={() => intentarNavegar('home')} onAbrirMenu={() => setShowDrawer(true)} />
         )}
-        {currentView === 'dashboard_historico' && (
+        {currentView === 'dashboard_historico' && puedeVerDashboard && (
           <DashboardHistoricoTemporada onClose={() => intentarNavegar('home')} onAbrirMenu={() => setShowDrawer(true)} />
         )}
-
         {/* DRAWER MÓVIL (Mantiene clases idénticas al Sidebar Desktop para coherencia) */}
         {showDrawer && (
           <div className="fixed inset-0 z-[200] flex animate-fade-in">
@@ -397,20 +366,18 @@ export default function App() {
                 <button onClick={() => setShowDrawer(false)} className="p-2 text-[#94A3B8] hover:text-[#0F172A] hover:bg-[#F8FAFC] rounded-xl transition-colors"><X className="w-5 h-5" /></button>
               </div>
               <nav className="flex-1 py-6 px-4 space-y-2 overflow-y-auto custom-scrollbar">
-                
-                {['admin', 'qc'].includes(user.role) && (
+                {puedeCrearProceso && (
                   <button onClick={() => intentarNavegar('nuevo-proceso')} className={`group w-full flex items-center px-4 py-3 bg-[#F0FDF4] hover:bg-[#DCFCE7] border border-[#A7F3D0] hover:border-[#86EFAC] rounded-[14px] text-[#065F46] transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-[1px] hover:shadow-[0_4px_12px_-2px_rgba(16,185,129,0.12)] active:scale-[0.98]`}>
                     <PlusCircle className={`w-5 h-5 text-[#059669] shrink-0 group-hover:rotate-90 group-hover:scale-[1.08] transition-transform duration-200`} />
                     <span className="text-[14px] font-semibold truncate ml-3">Crear Proceso</span>
                   </button>
                 )}
-                
-                <button onClick={() => intentarNavegar('historial')} className={`group w-full flex items-center px-3.5 py-2.5 rounded-[10px] transition-all duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] ${currentView === 'historial' ? 'bg-[#F8FAFC] text-[#0F172A]' : 'text-[#1E293B] hover:bg-[#F8FAFC] hover:text-[#0F172A] hover:translate-x-[3px]'}`}>
+                {puedeVerHistorial && (<button onClick={() => intentarNavegar('historial')} className={`group w-full flex items-center px-3.5 py-2.5 rounded-[10px] transition-all duration-150 ease-[cubic-bezier(0.16,1,0.3,1)] ${currentView === 'historial' ? 'bg-[#F8FAFC] text-[#0F172A]' : 'text-[#1E293B] hover:bg-[#F8FAFC] hover:text-[#0F172A] hover:translate-x-[3px]'}`}>
                   <ClipboardList className="w-5 h-5 text-[#2563EB] shrink-0 group-hover:-rotate-[12deg] group-hover:scale-[1.05] transition-transform duration-150" />
                   <span className="text-[14px] font-semibold truncate ml-3">Historial</span>
-                </button>
-                
+                </button>)}
                 {/* SECCIÓN ANÁLISIS */}
+                {puedeVerDashboard && (<>
                 <div className="pt-4 mt-2 mb-2 border-t border-[#F1F5F9]"><p className="px-4 text-[11px] font-bold text-[#94A3B8] uppercase tracking-wider">Análisis</p></div>
                 <div className="flex flex-col">
                   <button onClick={() => setDashboardsAbierto(!dashboardsAbierto)} className={`group w-full flex items-center justify-between px-3.5 py-2.5 rounded-[10px] transition-all duration-150 ${dashboardsAbierto ? 'bg-[#FFF7ED] border border-[#FFEDD5] text-[#9A3412]' : 'text-[#1E293B] hover:bg-[#F8FAFC] hover:text-[#0F172A]'}`}>
@@ -423,8 +390,8 @@ export default function App() {
                   </button>
                   {dashboardsAbierto && (
                     <div className="mt-1 flex flex-col space-y-1 animate-fade-in">
-                      <button 
-                        onClick={() => { intentarNavegar('dashboard_live'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }} 
+                      <button
+                        onClick={() => { intentarNavegar('dashboard_live'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }}
                         className={`group flex items-center w-full text-left py-2 pr-3 rounded-lg transition-all duration-150 ${currentView === 'dashboard_live' ? 'bg-[#F8FAFC] pl-[40px] text-[#0F172A]' : 'pl-[36px] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] hover:pl-[40px]'}`}
                       >
                         <div className="flex items-center gap-2">
@@ -432,15 +399,13 @@ export default function App() {
                           <span className="font-medium text-[13px]">Evap <span className="text-[11px] font-normal text-[#64748B]">(análisis en vivo)</span></span>
                         </div>
                       </button>
-                      
-                      <button 
+                      <button
                         onClick={() => { intentarNavegar('dashboard_resumen'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }}
                         className={`group w-full text-left py-2 pr-3 rounded-lg transition-all duration-150 font-medium text-[13px] ${currentView === 'dashboard_resumen' ? 'bg-[#F8FAFC] pl-[40px] text-[#0F172A]' : 'pl-[36px] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] hover:pl-[40px]'}`}
                       >
                         Resumen Diario
                       </button>
-
-                      <button 
+                      <button
                         onClick={() => { intentarNavegar('dashboard_historico'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }}
                         className={`group w-full text-left py-2 pr-3 rounded-lg transition-all duration-150 font-medium text-[13px] ${currentView === 'dashboard_historico' ? 'bg-[#F8FAFC] pl-[40px] text-[#0F172A]' : 'pl-[36px] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] hover:pl-[40px]'}`}
                       >
@@ -449,9 +414,24 @@ export default function App() {
                     </div>
                   )}
                 </div>
-
+                </>)}
+                {/* SECCIÓN DIGITACIÓN */}
+                {puedeDigitacion && (
+                  <>
+                    <div className="pt-4 mt-2 mb-2 border-t border-[#F1F5F9]">
+                      <p className="px-4 text-[11px] font-bold text-[#94A3B8] uppercase tracking-wider">Digitación</p>
+                    </div>
+                    <button
+                      onClick={() => intentarNavegar('digitacion-temperatura')}
+                      className={`group w-full flex items-center px-3.5 py-2.5 rounded-[10px] transition-all duration-150 ${currentView === 'digitacion-temperatura' ? 'bg-[#FFF7ED] border border-[#FFEDD5] text-[#9A3412]' : 'text-[#1E293B] hover:bg-[#F8FAFC] hover:text-[#0F172A] hover:translate-x-[3px]'}`}
+                    >
+                      <Thermometer className="w-5 h-5 text-[#EA580C] shrink-0 group-hover:scale-[1.06] transition-transform duration-150" />
+                      <span className="text-[14px] font-semibold truncate ml-3">Temperatura en línea</span>
+                    </button>
+                  </>
+                )}
                 {/* SECCIÓN ADMINISTRACIÓN */}
-                {user.role === 'admin' && (
+                {puedeGestionarAjustes && (
                   <>
                     <div className="pt-4 mt-2 mb-2 border-t border-[#F1F5F9]"><p className="px-4 text-[11px] font-bold text-[#94A3B8] uppercase tracking-wider">Administración</p></div>
                     <div className="flex flex-col">
@@ -465,9 +445,9 @@ export default function App() {
                       {showAjustes && (
                         <div className="mt-1 flex flex-col space-y-1 animate-fade-in">
                           {['exportadoras', 'variedades', 'huertos', 'parametros', 'usuarios'].map((item) => (
-                            <button 
+                            <button
                               key={item}
-                              onClick={() => intentarNavegar(`ajustes-${item}`)} 
+                              onClick={() => intentarNavegar(`ajustes-${item}`)}
                               className={`group w-full text-left py-2 pr-3 rounded-lg transition-all duration-150 font-medium text-[13px] ${currentView === `ajustes-${item}` ? 'bg-[#F8FAFC] pl-[40px] text-[#0F172A]' : 'pl-[36px] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] hover:pl-[40px]'}`}
                             >
                               {item === 'huertos' ? 'Productores/Huertos' : item === 'parametros' ? 'Parámetros Calificación' : item.charAt(0).toUpperCase() + item.slice(1)}
@@ -484,7 +464,7 @@ export default function App() {
                   <div className="w-10 h-10 rounded-full bg-[#FFFFFF] border border-[#E2E8F0] flex items-center justify-center text-[#475569] font-bold shrink-0"><User className="w-5 h-5" /></div>
                   <div className="overflow-hidden">
                     <p className="text-[#0F172A] text-[14px] font-semibold capitalize truncate">{user.username}</p>
-                    <p className="text-[10px] text-[#64748B] uppercase font-bold tracking-[0.06em]">{user.role === 'admin' ? 'Administrador' : user.role === 'qc' ? 'Control Calidad' : 'Gerencia'}</p>
+                    <p className="text-[10px] text-[#64748B] uppercase font-bold tracking-[0.06em]">{nombreRol(user.role)}</p>
                   </div>
                 </div>
                 <button onClick={handleLogout} className="group w-full flex items-center justify-center gap-2 py-2.5 px-3.5 bg-[#FFFFFF] border border-[#E2E8F0] hover:border-[#FECACA] hover:bg-[#FEF2F2] text-[#334155] hover:text-[#DC2626] rounded-[12px] transition-all duration-150 text-[13px] font-semibold hover:shadow-[0_2px_6px_-1px_rgba(239,68,68,0.1)] active:scale-[0.98]">
@@ -495,16 +475,15 @@ export default function App() {
             </aside>
           </div>
         )}
+        {ModalLogout}
         {ModalAdvertencia}
         {ModalInactividad}
       </div>
     );
   }
-
   // ================= VIEW DESKTOP PRINCIPAL (Sidebar Animado & Personalizado) =================
   return (
     <div className="flex h-screen bg-[#F4F7FA] overflow-hidden relative" style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif" }}>
-      
       {/* ESTILOS DE ANIMACIÓN GLOBAL INYECTADOS */}
       <style>{`
         @keyframes ping-radar {
@@ -528,7 +507,6 @@ export default function App() {
           box-shadow: none;
         }
       `}</style>
-
       <aside className={`${isCollapsed ? 'w-20' : 'w-[260px]'} bg-[#FFFFFF] border-r border-[#F1F5F9] flex flex-col shadow-[0_1px_3px_rgba(0,0,0,0.02)] z-20 shrink-0 transition-all duration-300 relative`}>
         <button onClick={() => setIsCollapsed(!isCollapsed)} className="absolute -right-3 top-7 bg-white border border-[#E2E8F0] text-[#475569] rounded-full p-1 shadow-md hover:bg-[#F8FAFC] transition-colors z-30">
           {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
@@ -536,28 +514,25 @@ export default function App() {
         <div className="h-20 flex items-center justify-center border-b border-[#F1F5F9] px-4 shrink-0">
           <img src="/Logo_goldanda.png" alt="Gold Anda" className={`${isCollapsed ? 'h-7' : 'h-10'} w-auto object-contain transition-all`} onError={(e) => { e.target.style.display = 'none'; }} />
         </div>
-        
         <nav className="flex-1 py-6 px-3 space-y-2 overflow-y-auto custom-scrollbar">
-          
-          {['admin', 'qc'].includes(user.role) && (
+          {puedeCrearProceso && (
             <button onClick={() => intentarNavegar('nuevo-proceso')} className={`group w-full flex items-center ${isCollapsed ? 'justify-center px-0 py-3' : 'px-4 py-3'} bg-[#F0FDF4] hover:bg-[#DCFCE7] border border-[#A7F3D0] hover:border-[#86EFAC] rounded-[14px] text-[#065F46] transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] hover:-translate-y-[1px] hover:shadow-[0_4px_12px_-2px_rgba(16,185,129,0.15)] active:scale-[0.98]`}>
               <PlusCircle className="w-5 h-5 text-[#059669] shrink-0 group-hover:rotate-90 group-hover:scale-[1.08] transition-transform duration-300" />
               {!isCollapsed && <span className="text-[14px] font-semibold truncate ml-3">Crear Proceso</span>}
             </button>
           )}
-          
-          <button onClick={() => intentarNavegar('historial')} className={`group w-full flex items-center ${isCollapsed ? 'justify-center px-0 py-2.5' : 'px-3.5 py-2.5'} rounded-[10px] transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${currentView === 'historial' ? 'bg-[#F8FAFC] text-[#0F172A]' : 'text-[#1E293B] hover:bg-[#F8FAFC] hover:text-[#0F172A] hover:translate-x-[3px]'}`}>
+          {puedeVerHistorial && (<button onClick={() => intentarNavegar('historial')} className={`group w-full flex items-center ${isCollapsed ? 'justify-center px-0 py-2.5' : 'px-3.5 py-2.5'} rounded-[10px] transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)] ${currentView === 'historial' ? 'bg-[#F8FAFC] text-[#0F172A]' : 'text-[#1E293B] hover:bg-[#F8FAFC] hover:text-[#0F172A] hover:translate-x-[3px]'}`}>
             <ClipboardList className="w-5 h-5 text-[#2563EB] shrink-0 group-hover:-rotate-[12deg] group-hover:scale-[1.05] transition-transform duration-200" />
             {!isCollapsed && <span className="text-[14px] font-semibold truncate ml-3">Historial</span>}
-          </button>
-          
+          </button>)}
           {/* SECCIÓN ANÁLISIS AGRUPADA */}
+          {puedeVerDashboard && (<>
           <div className="pt-4 mt-2 mb-2 border-t border-[#F1F5F9]">
             {!isCollapsed && <p className="px-4 text-[11px] font-bold text-[#94A3B8] uppercase tracking-wider">Análisis</p>}
           </div>
           <div className="flex flex-col">
-            <button 
-              onClick={() => { if (isCollapsed) { setIsCollapsed(false); setDashboardsAbierto(true); } else { setDashboardsAbierto(!dashboardsAbierto); } }} 
+            <button
+              onClick={() => { if (isCollapsed) { setIsCollapsed(false); setDashboardsAbierto(true); } else { setDashboardsAbierto(!dashboardsAbierto); } }}
               className={`group w-full flex items-center justify-between ${isCollapsed ? 'justify-center px-0 py-2.5' : 'px-3.5 py-2.5'} rounded-[10px] transition-all duration-200 ${dashboardsAbierto && !isCollapsed ? 'bg-[#FFF7ED] border border-[#FFEDD5] text-[#9A3412]' : 'text-[#1E293B] hover:bg-[#F8FAFC] hover:text-[#0F172A]'}`}
             >
               <div className="flex items-center">
@@ -567,11 +542,10 @@ export default function App() {
               </div>
               {!isCollapsed && <ChevronDown className={`w-4 h-4 text-[#EA580C] transition-transform duration-300 ${dashboardsAbierto ? 'rotate-180' : ''}`} />}
             </button>
-            
             {dashboardsAbierto && !isCollapsed && (
               <div className="mt-1 flex flex-col space-y-1 animate-fade-in">
-                <button 
-                  onClick={() => { intentarNavegar('dashboard_live'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }} 
+                <button
+                  onClick={() => { intentarNavegar('dashboard_live'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }}
                   className={`group flex items-center w-full text-left py-2 pr-3 rounded-lg transition-all duration-200 ${currentView === 'dashboard_live' ? 'bg-[#F8FAFC] pl-[40px] text-[#0F172A]' : 'pl-[36px] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] hover:pl-[40px]'}`}
                 >
                   <div className="flex items-center gap-2">
@@ -579,16 +553,14 @@ export default function App() {
                     <span className="font-medium text-[13px]">Evap <span className="text-[11px] font-normal text-[#64748B]">(análisis en vivo)</span></span>
                   </div>
                 </button>
-                
-                <button 
-                  onClick={() => { intentarNavegar('dashboard_resumen'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }} 
+                <button
+                  onClick={() => { intentarNavegar('dashboard_resumen'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }}
                   className={`group w-full text-left py-2 pr-3 rounded-lg transition-all duration-200 font-medium text-[13px] ${currentView === 'dashboard_resumen' ? 'bg-[#F8FAFC] pl-[40px] text-[#0F172A]' : 'pl-[36px] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] hover:pl-[40px]'}`}
                 >
                   Resumen Diario
                 </button>
-
-                <button 
-                  onClick={() => { intentarNavegar('dashboard_historico'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }} 
+                <button
+                  onClick={() => { intentarNavegar('dashboard_historico'); try { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); } catch (e) {} }}
                   className={`group w-full text-left py-2 pr-3 rounded-lg transition-all duration-200 font-medium text-[13px] ${currentView === 'dashboard_historico' ? 'bg-[#F8FAFC] pl-[40px] text-[#0F172A]' : 'pl-[36px] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] hover:pl-[40px]'}`}
                 >
                   Histórico Temporada
@@ -596,16 +568,32 @@ export default function App() {
               </div>
             )}
           </div>
-
+          </>)}
+          {/* SECCIÓN DIGITACIÓN */}
+          {puedeDigitacion && (
+            <>
+              <div className="pt-4 mt-2 mb-2 border-t border-[#F1F5F9]">
+                {!isCollapsed && <p className="px-4 text-[11px] font-bold text-[#94A3B8] uppercase tracking-wider">Digitación</p>}
+              </div>
+              <button
+                onClick={() => intentarNavegar('digitacion-temperatura')}
+                title={isCollapsed ? 'Temperatura en línea' : undefined}
+                className={`group w-full flex items-center ${isCollapsed ? 'justify-center px-0 py-2.5' : 'px-3.5 py-2.5'} rounded-[10px] transition-all duration-200 ${currentView === 'digitacion-temperatura' ? 'bg-[#FFF7ED] border border-[#FFEDD5] text-[#9A3412]' : 'text-[#1E293B] hover:bg-[#F8FAFC] hover:text-[#0F172A] hover:translate-x-[3px]'}`}
+              >
+                <Thermometer className="w-5 h-5 text-[#EA580C] shrink-0 group-hover:scale-[1.06] transition-transform duration-200" />
+                {!isCollapsed && <span className="text-[14px] font-semibold truncate ml-3">Temperatura en línea</span>}
+              </button>
+            </>
+          )}
           {/* Permiso Sidebar: Solo Admin ve Ajustes */}
-          {user.role === 'admin' && (
+          {puedeGestionarAjustes && (
             <>
               <div className="pt-4 mt-2 mb-2 border-t border-[#F1F5F9]">
                 {!isCollapsed && <p className="px-4 text-[11px] font-bold text-[#94A3B8] uppercase tracking-wider">Administración</p>}
               </div>
               <div className="flex flex-col">
-                <button 
-                  onClick={() => { if (isCollapsed) setIsCollapsed(false); setShowAjustes(!showAjustes); }} 
+                <button
+                  onClick={() => { if (isCollapsed) setIsCollapsed(false); setShowAjustes(!showAjustes); }}
                   className={`group w-full flex items-center justify-between ${isCollapsed ? 'justify-center px-0 py-2.5' : 'px-3.5 py-2.5'} rounded-[10px] transition-all duration-200 ${showAjustes ? 'bg-[#F8FAFC] text-[#0F172A]' : 'text-[#334155] hover:bg-[#F8FAFC]'}`}
                 >
                   <div className="flex items-center">
@@ -614,13 +602,12 @@ export default function App() {
                   </div>
                   {!isCollapsed && <ChevronDown className={`w-4 h-4 text-[#94A3B8] transition-transform duration-300 ${showAjustes ? 'rotate-180' : ''}`} />}
                 </button>
-                
                 {showAjustes && !isCollapsed && (
                   <div className="mt-1 flex flex-col space-y-1 animate-fade-in">
                     {['exportadoras', 'variedades', 'huertos', 'parametros', 'usuarios'].map(item => (
-                      <button 
+                      <button
                         key={item}
-                        onClick={() => intentarNavegar(`ajustes-${item}`)} 
+                        onClick={() => intentarNavegar(`ajustes-${item}`)}
                         className={`group w-full text-left py-2 pr-3 rounded-lg transition-all duration-200 font-medium text-[13px] ${currentView === `ajustes-${item}` ? 'bg-[#F8FAFC] pl-[40px] text-[#0F172A]' : 'pl-[36px] text-[#475569] hover:bg-[#F1F5F9] hover:text-[#0F172A] hover:pl-[40px]'}`}
                       >
                         {item === 'huertos' ? 'Productores/Huertos' : item === 'parametros' ? 'Parámetros Calificación' : item.charAt(0).toUpperCase() + item.slice(1)}
@@ -632,7 +619,6 @@ export default function App() {
             </>
           )}
         </nav>
-        
         <div className="p-3 border-t border-[#F1F5F9] bg-[#F8FAFC]">
           <div className={`flex items-center ${isCollapsed ? 'justify-center mb-3' : 'gap-3 mb-4 px-2'}`}>
             <div className="w-10 h-10 rounded-full bg-[#FFFFFF] border border-[#E2E8F0] flex items-center justify-center text-[#475569] shadow-sm shrink-0"><User className="w-5 h-5" /></div>
@@ -640,7 +626,7 @@ export default function App() {
               <div className="overflow-hidden">
                 <p className="text-[#0F172A] text-[14px] font-semibold capitalize truncate">{user.username}</p>
                 <p className="text-[10px] text-[#64748B] uppercase font-bold tracking-[0.06em]">
-                  {user.role === 'admin' ? 'Administrador' : user.role === 'qc' ? 'Control Calidad' : 'Gerencia'}
+                  {nombreRol(user.role)}
                 </p>
               </div>
             )}
@@ -651,7 +637,6 @@ export default function App() {
           </button>
         </div>
       </aside>
-
       <main className="flex-1 h-full overflow-hidden">
         {currentView === 'home' && (
           <div className="w-full h-full p-4 md:p-8 flex items-center justify-center animate-fade-in">
@@ -662,21 +647,20 @@ export default function App() {
             </div>
           </div>
         )}
-        
         {/* === RENDERIZADO DE MÓDULOS SEGÚN VISTA === */}
-        {currentView === 'historial' && (
-          <HistorialProcesosView 
-            onVerResumen={(proceso) => console.log('Resumen:', proceso)} 
-            userRole={user.role}
-          />
+        {currentView === 'historial' && puedeVerHistorial && (
+          <HistorialProcesosView onVerResumen={(proceso)=>console.log('Resumen:',proceso)} userRole={user.role} usuarioId={user.id} puedeEditar={puedeEditarInformes} puedeEliminar={puedeEliminarProcesos}/>
         )}
-        {currentView === 'ajustes-exportadoras' && <div className="p-6 md:p-8 overflow-y-auto h-full animate-fade-in"><GestionExportadoras exportadoras={dbData.exportadoras} setExportadoras={(nuevas) => setDbData(prev => ({ ...prev, exportadoras: nuevas }))} /></div>}
-        {currentView === 'ajustes-variedades' && <div className="p-6 md:p-8 overflow-y-auto h-full animate-fade-in"><GestionVariedades variedades={dbData.variedades} setVariedades={(nuevas) => setDbData(prev => ({ ...prev, variedades: nuevas }))} /></div>}
-        {currentView === 'ajustes-huertos' && <div className="p-6 md:p-8 overflow-y-auto h-full animate-fade-in"><TablaHuertos exportadoras={dbData.exportadoras} productores={dbData.productores} setProductores={(nuevos) => setDbData(prev => ({ ...prev, productores: nuevos }))} /></div>}
-        {currentView === 'ajustes-parametros' && <div className="p-6 md:p-8 overflow-y-auto h-full animate-fade-in"><ParametrosCalificacion /></div>}
-        {currentView === 'ajustes-usuarios' && <div className="p-6 md:p-8 overflow-y-auto h-full animate-fade-in"><GestionUsuarios /></div>}
+        {currentView === 'digitacion-temperatura' && puedeDigitacion && (
+          <TemperaturaLineaModule usuarioId={user.id} />
+        )}
+        {currentView === 'ajustes-exportadoras' && puedeGestionarAjustes && <div className="p-6 md:p-8 overflow-y-auto h-full animate-fade-in"><GestionExportadoras exportadoras={dbData.exportadoras} setExportadoras={(nuevas) => setDbData(prev => ({ ...prev, exportadoras: nuevas }))} /></div>}
+        {currentView === 'ajustes-variedades' && puedeGestionarAjustes && <div className="p-6 md:p-8 overflow-y-auto h-full animate-fade-in"><GestionVariedades variedades={dbData.variedades} setVariedades={(nuevas) => setDbData(prev => ({ ...prev, variedades: nuevas }))} /></div>}
+        {currentView === 'ajustes-huertos' && puedeGestionarAjustes && <div className="p-6 md:p-8 overflow-y-auto h-full animate-fade-in"><TablaHuertos exportadoras={dbData.exportadoras} productores={dbData.productores} setProductores={(nuevos) => setDbData(prev => ({ ...prev, productores: nuevos }))} /></div>}
+        {currentView === 'ajustes-parametros' && puedeGestionarAjustes && <div className="p-6 md:p-8 overflow-y-auto h-full animate-fade-in"><ParametrosCalificacion /></div>}
+        {currentView === 'ajustes-usuarios' && puedeGestionarAjustes && <div className="p-6 md:p-8 overflow-y-auto h-full animate-fade-in"><GestionUsuarios /></div>}
       </main>
-
+      {ModalLogout}
       {ModalAdvertencia}
       {ModalInactividad}
     </div>
