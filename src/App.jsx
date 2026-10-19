@@ -5,7 +5,7 @@ import DashboardResumenDiario from './modules/dashboard/DashboardResumenDiario';
 import DashboardHistoricoTemporada from './modules/dashboard/DashboardHistorico';
 import NuevoProceso from './modules/inspeccion/NuevoProceso';
 import InspeccionModule from './modules/inspeccion/InspeccionModule';
-import TemperaturaLineaModule from './modules/digitacion/TemperaturaLineaModule';
+import TemperaturaLineaModule from './modules/digitacionn/TemperaturaLineaModule';
 import HistorialProcesosView from './modules/historial/HistorialProcesosView';
 import GestionExportadoras from './modules/ajustes/GestionExportadoras';
 import GestionVariedades from './modules/ajustes/GestionVariedades';

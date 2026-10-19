@@ -41,7 +41,7 @@ const HISTORIAL_COLUMNAS = [
   { codigo: 'agua-est-fungicida', zona: 'ESTANQUE FUNGICIDA', variable: 'T° AGUA' },
   { codigo: 'pulpa-est-fungicida', zona: 'ESTANQUE FUNGICIDA', variable: 'T° PULPA' },
   { codigo: 'pulpa-sellado', zona: 'SELLADO', variable: 'T° PULPA' },
-  { codigo: 'ambiente-sellado', zona: 'SALA PROCESO', variable: 'T° AMBIENTE' },
+  { codigo: 'ambiente-sellado', zona: 'SELLADO', variable: 'T° AMBIENTE' },
   { codigo: 'amb-palletizaje', zona: 'PALETIZADO', variable: 'T° AMBIENTE' }
 ];
 const COLUMNAS_VISIBLES_BASE = 7;
