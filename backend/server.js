@@ -1,10 +1,12 @@
 // EVAP: cargar el .env del backend, no el de la carpeta de la terminal.
 const path = require('path');
+const crypto = require('crypto');
+const { promisify } = require('util');
 const dotenv = require('dotenv');
 const RUTA_ENV = path.join(__dirname, '.env');
 const CLAVES_CONFIGURACION = [
   'PLANTA_ID', 'DB_HOST', 'DB_PORT', 'DB_NAME',
-  'DB_USER', 'DB_PASSWORD', 'PORT'
+  'DB_USER', 'DB_PASSWORD', 'PORT', 'EVAP_ADMIN_INICIAL_PASSWORD', 'EVAP_CORS_ORIGENES'
 ];
 
 // Conservar los valores previos para detectar conflictos sin sobrescribirlos.
@@ -87,7 +89,12 @@ const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
 const app = express();
-app.use(cors());
+// Optativo: restringir los origenes web por planta sin cambiar React.
+// Si no se configura, conserva el CORS abierto de la version de pruebas.
+const origenesCors = String(process.env.EVAP_CORS_ORIGENES || '').split(',').map(x => x.trim()).filter(Boolean);
+app.use(cors(origenesCors.length ? {
+  origin: (origin, callback) => callback(null, !origin || origenesCors.includes(origin))
+} : undefined));
 app.use(express.json({ limit: '12mb' }));
 const pool = new Pool({
   user: process.env.DB_USER,
@@ -96,6 +103,63 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD,
   port: process.env.DB_PORT,
 });
+// Seguridad basica de usuarios: no requiere tokens ni cambios en el frontend.
+// Las claves antiguas (texto plano) se convierten automaticamente despues de un login correcto.
+const scryptAsync = promisify(crypto.scrypt);
+const FORMATO_CLAVE = /^scrypt\$([a-f0-9]{32})\$([a-f0-9]{128})$/;
+async function protegerClave(clave) {
+  const sal = crypto.randomBytes(16).toString('hex');
+  const claveDerivada = await scryptAsync(clave, Buffer.from(sal, 'hex'), 64);
+  return `scrypt$${sal}$${claveDerivada.toString('hex')}`;
+}
+async function verificarClave(clave, valorGuardado) {
+  if (typeof valorGuardado !== 'string') return { valido: false, antigua: false };
+  const coincidencia = valorGuardado.match(FORMATO_CLAVE);
+  if (coincidencia) {
+    const actual = Buffer.from(coincidencia[2], 'hex');
+    const calculado = await scryptAsync(clave, Buffer.from(coincidencia[1], 'hex'), actual.length);
+    return { valido: crypto.timingSafeEqual(actual, calculado), antigua: false };
+  }
+  // No tratar como texto plano un valor con prefijo de hash malformado.
+  if (valorGuardado.startsWith('scrypt$')) return { valido: false, antigua: false };
+  const antigua = Buffer.from(valorGuardado, 'utf8');
+  const ingresada = Buffer.from(clave, 'utf8');
+  return { valido: antigua.length === ingresada.length && crypto.timingSafeEqual(antigua, ingresada), antigua: true };
+}
+const ROLES_VALIDOS = new Set(['admin', 'gerencia', 'qc', 'qc_avanzado']);
+function validarDatosCuenta(username, role, permisos, password, requierePassword) {
+  if (typeof username !== 'string' || !username.trim() || username.trim().length > 100)
+    return 'El nombre de usuario es obligatorio (maximo 100 caracteres).';
+  if (!ROLES_VALIDOS.has(role || 'qc')) return 'El rol seleccionado no es valido.';
+  if (permisos != null && (typeof permisos !== 'object' || Array.isArray(permisos)))
+    return 'Los permisos del usuario no tienen un formato valido.';
+  if (requierePassword || (typeof password === 'string' && password.trim())) {
+    if (typeof password !== 'string' || password.trim().length < 8 || password.trim().length > 128)
+      return 'La contrasena debe tener entre 8 y 128 caracteres.';
+  }
+  return null;
+}
+const intentosLogin = new Map();
+const VENTANA_LOGIN_MS = 15 * 60 * 1000;
+const MAX_FALLOS_LOGIN = 8;
+function obtenerRegistroLogin(clave) {
+  const registro = intentosLogin.get(clave);
+  if (!registro || Date.now() - registro.inicio >= VENTANA_LOGIN_MS) {
+    intentosLogin.delete(clave);
+    return null;
+  }
+  return registro;
+}
+function registrarFalloLogin(clave) {
+  const registro = obtenerRegistroLogin(clave) || { inicio: Date.now(), fallos: 0 };
+  registro.fallos += 1;
+  intentosLogin.set(clave, registro);
+  // Cota simple de memoria para pruebas internas.
+  if (intentosLogin.size > 5000) {
+    for (const [k, v] of intentosLogin) if (Date.now() - v.inicio >= VENTANA_LOGIN_MS) intentosLogin.delete(k);
+    while (intentosLogin.size > 5000) intentosLogin.delete(intentosLogin.keys().next().value);
+  }
+}
 // Identidad operativa: no publica nombres de bases, usuarios ni contraseñas.
 app.get('/api/planta', (_req, res) => {
   res.json({ plantaId: PLANTA_ID, plantaNombre: PLANTA_NOMBRE });
@@ -590,14 +654,20 @@ pool.connect()
           AND cd.tipo IS NULL
           AND d.tipo IS NOT NULL
       `);
-      // Insertar usuario Admin inicial por defecto si la tabla está vacía
+      // Solo crear el primer administrador si TI define una clave inicial privada en .env.
       const checkAdmin = await client.query('SELECT COUNT(*) FROM usuarios');
-      if (parseInt(checkAdmin.rows[0].count, 10) === 0) {
-        await client.query(`
-          INSERT INTO usuarios (username, password, role, permisos)
-          VALUES ('admin', 'admin123', 'admin', '{"crear_proceso":true,"editar_informes":true,"ver_dashboard":true,"ver_historial":true,"acceder_digitacion":true,"eliminar_procesos":true,"gestionar_ajustes":true}'::jsonb)
-        `);
-        console.log('👤 Usuario "admin" inicial creado con éxito (Clave: admin123).');
+      if (Number(checkAdmin.rows[0].count) === 0) {
+        const claveInicial = String(process.env.EVAP_ADMIN_INICIAL_PASSWORD || '').trim();
+        if (claveInicial.length >= 8 && claveInicial.length <= 128) {
+          const claveProtegida = await protegerClave(claveInicial);
+          await client.query(`
+            INSERT INTO usuarios (username, password, role, permisos)
+            VALUES ('admin', $1, 'admin', '{"crear_proceso":true,"editar_informes":true,"ver_dashboard":true,"ver_historial":true,"acceder_digitacion":true,"eliminar_procesos":true,"gestionar_ajustes":true}'::jsonb)
+          `, [claveProtegida]);
+          console.log('Usuario administrador inicial creado mediante configuracion privada.');
+        } else {
+          console.warn('No hay usuarios en esta planta. Define EVAP_ADMIN_INICIAL_PASSWORD en el .env (8 a 128 caracteres) para crear el primer admin.');
+        }
       }
       await client.query(`ALTER TABLE procesos ADD COLUMN IF NOT EXISTS hora_inicio TIMESTAMP;`);
       await client.query(`ALTER TABLE procesos ADD COLUMN IF NOT EXISTS hora_fin TIMESTAMP;`);
@@ -746,18 +816,36 @@ app.get('/api/live', (req, res) => {
 // ==========================================
 app.post('/api/login', async (req, res) => {
   try {
-    const { username, password } = req.body;
-    if (!username || !password) {
-      return res.status(400).json({ success: false, message: 'Usuario y contraseña requeridos' });
+    const { username, password } = req.body || {};
+    if (typeof username !== 'string' || typeof password !== 'string' ||
+        !username.trim() || !password.trim() || username.length > 100 || password.length > 256)
+      return res.status(400).json({ success: false, message: 'Usuario y contrasena requeridos y validos' });
+    const nombre = username.trim();
+    const clave = password.trim(); // Compatibilidad con el formulario de EVAP actual.
+    const identificador = `${req.ip}:${nombre.toLowerCase()}`;
+    const intentos = obtenerRegistroLogin(identificador);
+    if (intentos && intentos.fallos >= MAX_FALLOS_LOGIN) {
+      res.set('Retry-After', String(Math.ceil((VENTANA_LOGIN_MS - (Date.now() - intentos.inicio)) / 1000)));
+      return res.status(429).json({ success: false, message: 'Demasiados intentos. Intenta nuevamente en unos minutos.' });
     }
     const result = await pool.query(
-      'SELECT id, username, role, permisos FROM usuarios WHERE LOWER(username) = LOWER($1) AND password = $2',
-      [username.trim(), password.trim()]
+      'SELECT id, username, password, role, permisos FROM usuarios WHERE LOWER(username) = LOWER($1)',
+      [nombre]
     );
-    if (result.rows.length === 0) {
+    const usuario = result.rows[0] || null;
+    const comprobacion = usuario ? await verificarClave(clave, usuario.password) : { valido: false };
+    if (!comprobacion.valido) {
+      registrarFalloLogin(identificador);
       return res.status(401).json({ success: false, message: 'Usuario o contraseña incorrectos' });
     }
-    res.json({ success: true, user: result.rows[0] });
+    intentosLogin.delete(identificador);
+    if (comprobacion.antigua) {
+      // Actualiza solo si otro inicio de sesion no modifico la clave primero.
+      const nuevaClave = await protegerClave(clave);
+      await pool.query('UPDATE usuarios SET password = $1 WHERE id = $2 AND password = $3', [nuevaClave, usuario.id, usuario.password]);
+    }
+    const { id, username: usernameGuardado, role, permisos } = usuario;
+    res.json({ success: true, user: { id, username: usernameGuardado, role, permisos } });
   } catch (error) {
     console.error('Error en /api/login:', error);
     res.status(500).json({ success: false, message: 'Error interno del servidor en el login' });
@@ -779,14 +867,14 @@ app.get('/api/usuarios', async (req, res) => {
 // Crear un nuevo usuario
 app.post('/api/usuarios', async (req, res) => {
   try {
-    const { username, password, role, permisos } = req.body;
-    if (!username || !password) {
-      return res.status(400).json({ message: 'El usuario y la contraseña son obligatorios' });
-    }
+    const { username, password, role, permisos } = req.body || {};
+    const errorCuenta = validarDatosCuenta(username, role, permisos, password, true);
+    if (errorCuenta) return res.status(400).json({ message: errorCuenta });
     const permisosJson = JSON.stringify(permisos || {});
+    const claveProtegida = await protegerClave(password.trim());
     const result = await pool.query(
       'INSERT INTO usuarios (username, password, role, permisos) VALUES ($1, $2, $3, $4::jsonb) RETURNING id, username, role, permisos',
-      [username.trim(), password.trim(), role || 'qc', permisosJson]
+      [username.trim(), claveProtegida, role || 'qc', permisosJson]
     );
     res.status(201).json(result.rows[0]);
   } catch (error) {
@@ -801,18 +889,21 @@ app.post('/api/usuarios', async (req, res) => {
 app.put('/api/usuarios/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { username, password, role, permisos } = req.body;
+    const { username, password, role, permisos } = req.body || {};
+    const errorCuenta = validarDatosCuenta(username, role, permisos, password, false);
+    if (errorCuenta) return res.status(400).json({ message: errorCuenta });
     const permisosJson = JSON.stringify(permisos || {});
     let result;
-    if (password && password.trim() !== '') {
+    if (typeof password === 'string' && password.trim() !== '') {
+      const claveProtegida = await protegerClave(password.trim());
       result = await pool.query(
         'UPDATE usuarios SET username = $1, password = $2, role = $3, permisos = $4::jsonb WHERE id = $5 RETURNING id, username, role, permisos',
-        [username.trim(), password.trim(), role, permisosJson, id]
+        [username.trim(), claveProtegida, role || 'qc', permisosJson, id]
       );
     } else {
       result = await pool.query(
         'UPDATE usuarios SET username = $1, role = $2, permisos = $3::jsonb WHERE id = $4 RETURNING id, username, role, permisos',
-        [username.trim(), role, permisosJson, id]
+        [username.trim(), role || 'qc', permisosJson, id]
       );
     }
     if (result.rowCount === 0) {
