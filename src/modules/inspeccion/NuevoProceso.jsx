@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronLeft, Users, Play, AlertTriangle } from 'lucide-react';
+import { API_URL } from '../../config/api.js';
 
-const API_URL = window.location.hostname.includes('goldanda.cl') ? 'https://evap.maq.goldanda.cl' : `http://${window.location.hostname || 'localhost'}:3001`;
 const fechaChile = () => new Intl.DateTimeFormat('es-CL', { timeZone: 'America/Santiago', day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date()).replaceAll('/', '-');
 const fechaIsoChile = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Santiago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 const fechaProceso = valor => {

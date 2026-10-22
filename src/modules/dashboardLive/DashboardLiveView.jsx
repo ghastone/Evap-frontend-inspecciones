@@ -1,19 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { ArrowLeft, Activity, Maximize, AlertTriangle } from 'lucide-react';
+import { API_URL } from '../../config/api.js';
 const emptyData = {
-  numProceso: '...', 
-  huerto: 'Iniciando inspección...', 
-  variedad: '...', 
+  numProceso: '...',
+  huerto: 'Iniciando inspección...',
+  variedad: '...',
   cajasEvaluadas: 0,
-  exportable: 100.0, 
-  pctCalidad: 0.0, 
-  pctCondicion: 0.0, 
-  estado: 'Evaluando', 
+  exportable: 100.0,
+  pctCalidad: 0.0,
+  pctCondicion: 0.0,
+  estado: 'Evaluando',
   calificacion: '-',
-  solidos: { 
-    light: { min: 0.0, max: 0.0, prom: 0.0, count: 0 }, 
-    dark: { min: 0.0, max: 0.0, prom: 0.0, count: 0 } 
+  solidos: {
+    light: { min: 0.0, max: 0.0, prom: 0.0, count: 0 },
+    dark: { min: 0.0, max: 0.0, prom: 0.0, count: 0 }
   },
   topCalidad: [{ nombre: 'Sin registros', pct: 0, lim1: 0, lim2: 0 }],
   topCondicion: [{ nombre: 'Sin registros', pct: 0, lim1: 0, lim2: 0 }]
@@ -21,7 +22,7 @@ const emptyData = {
 function BarraTolerancia({ nombre, pct, lim1, lim2 }) {
   const pctZona1 = 100 / 3;
   const pctZona2 = 100 / 3;
-  const pctZona3 = 100 / 3; 
+  const pctZona3 = 100 / 3;
   const fill1 = Math.min(pct, lim1);
   const fill2 = Math.max(0, Math.min(pct, lim2) - lim1);
   const fill3 = Math.max(0, pct - lim2);
@@ -29,7 +30,7 @@ function BarraTolerancia({ nombre, pct, lim1, lim2 }) {
   const forzarZonaAzul = lim1 === 0 && pct > 0 && defectosCondicionLimiteCero.includes(nombre);
   const wFill1 = forzarZonaAzul ? 100 : (lim1 > 0 ? (fill1 / lim1) * 100 : 0);
   const wFill2 = (lim2 - lim1) > 0 ? (fill2 / (lim2 - lim1)) * 100 : 0;
-  const maxOverflow = lim2 * 0.5 || 5; 
+  const maxOverflow = lim2 * 0.5 || 5;
   const wFill3 = maxOverflow > 0 ? Math.min((fill3 / maxOverflow) * 100, 100) : 100;
   let visualPct = 0;
   if (pct <= lim1) {
@@ -65,8 +66,8 @@ function BarraTolerancia({ nombre, pct, lim1, lim2 }) {
             <div className="absolute top-0 left-0 h-full bg-gradient-to-r from-[#fb7185] to-[#e11d48]" style={{ width: `${anim.w3}%`, transition: transicionBarra }}></div>
           </div>
           {pct > 0 && (
-            <div 
-              className="absolute top-0 left-0 h-full flex items-center justify-end pr-2" 
+            <div
+              className="absolute top-0 left-0 h-full flex items-center justify-end pr-2"
               style={{ width: `${anim.visual}%`, minWidth: '45px', transition: transicionBarra }}
             >
               <span className="text-white text-[10px] lg:text-[11px] font-bold leading-none drop-shadow-md z-10">
@@ -154,9 +155,6 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
   const [donutHover, setDonutHover] = useState(null);
   const parametrosRef = useRef({ calidad: [], condicion: [] });
   const firmaDatosRef = useRef('');
-  const API_URL = window.location.hostname.includes('goldanda.cl')
-    ? 'https://evap.maq.goldanda.cl'
-    : `http://${window.location.hostname || 'localhost'}:3001`;
   const SUM_CALIDAD = 'Sumatoria de calidad';
   const SUM_CONDICION = 'Sumatoria de condición';
   const numero = valor => {
@@ -382,8 +380,8 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
           .delay-2 { animation-delay: 0.2s; }
         `}</style>
         <div className="absolute top-6 left-6 flex items-center gap-3">
-          <button 
-            onClick={handleMenuAction} 
+          <button
+            onClick={handleMenuAction}
             title={isFullScreen ? "Mostrar menú lateral" : "Pantalla completa"}
             className="p-2.5 bg-white border border-[#e2e8f0] hover:bg-[#f1f5f9] text-[#64748b] hover:text-[#0f172a] rounded-xl transition-all shadow-sm group"
           >
@@ -412,8 +410,8 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
   if (isObjCalidad && isObjCondicion) motivoObj = "EXCESO DE DEFECTOS DE CALIDAD Y CONDICIÓN";
   else if (isObjCalidad) motivoObj = "EXCESO DE DEFECTOS DE CALIDAD";
   else if (isObjCondicion) motivoObj = "EXCESO DE DEFECTOS DE CONDICIÓN";
-  const bannerStartColor = isObjetado ? "#991B1B" : "#047857"; 
-  const bannerEndColor = isObjetado ? "#DC2626" : "#10b981";   
+  const bannerStartColor = isObjetado ? "#991B1B" : "#047857";
+  const bannerEndColor = isObjetado ? "#DC2626" : "#10b981";
   return (
     <div className={`dashboard-live-root ${isFullScreen ? "fixed inset-0 z-[100] h-screen" : "h-full relative"} w-full bg-[#f8fafc] overflow-x-hidden overflow-y-auto md:overflow-y-hidden`} style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
       <style>{`
@@ -462,7 +460,7 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
             <path d="M400,0 H550 C 515,0 500,50 465,50 H400 Z" fill="url(#dots)"/>
           </svg>
           <div className="relative z-10 flex items-center pl-3 sm:pl-5 text-white h-full">
-            <button 
+            <button
               onClick={handleMenuAction}
               title={isFullScreen ? "Abrir menú lateral" : "Pantalla completa"}
               className="mr-3 xl:mr-5 flex items-center justify-center w-8 h-8 xl:w-10 xl:h-10 bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 rounded-xl transition-all shadow-sm group shrink-0"
@@ -484,10 +482,10 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
             </div>
           </div>
           <div className="relative z-10 pr-6 sm:pr-10 flex items-center gap-4 sm:gap-6 h-full">
-            <img 
-              src="/Logo_goldanda.png" 
-              alt="Gold Anda" 
-              className="h-[24px] xl:h-[30px] w-auto object-contain hidden sm:block ml-2 brightness-0 invert opacity-90" 
+            <img
+              src="/Logo_goldanda.png"
+              alt="Gold Anda"
+              className="h-[24px] xl:h-[30px] w-auto object-contain hidden sm:block ml-2 brightness-0 invert opacity-90"
               onError={(e) => { e.target.style.display = 'none'; }}
             />
           </div>
@@ -538,10 +536,10 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
                       <linearGradient id="colorCondicion" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#fb7185" /><stop offset="100%" stopColor="#e11d48" /></linearGradient>
                     </defs>
                     <Pie key={`pie-live-${animacionDatos}`}
-                      data={chartData} cx="50%" cy="50%" 
-                      innerRadius="74%" outerRadius="100%" 
-                      startAngle={90} endAngle={-270} 
-                      cornerRadius={15} paddingAngle={-8} 
+                      data={chartData} cx="50%" cy="50%"
+                      innerRadius="74%" outerRadius="100%"
+                      startAngle={90} endAngle={-270}
+                      cornerRadius={15} paddingAngle={-8}
                       dataKey="value" stroke="none"
                       animationDuration={720}
                       animationBegin={0}

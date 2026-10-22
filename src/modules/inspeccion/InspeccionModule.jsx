@@ -4,6 +4,7 @@ import {
   Trash2, X, ArrowLeft
 } from 'lucide-react';
 import FotografiasProceso from './FotografiasProceso';
+import { API_URL } from '../../config/api.js';
 const SUM_CALIDAD = 'Sumatoria de calidad';
 const SUM_CONDICION = 'Sumatoria de condición';
 const crearMapaDefectos = nombres => Object.fromEntries(nombres.map(nombre => [nombre, 0]));
@@ -105,9 +106,6 @@ export default function InspeccionModule({
   const tieneDefectosCajaActual = [...Object.values(cajaActual.defCalidad || {}), ...Object.values(cajaActual.defCondicion || {})].some(v => (parseInt(v, 10) || 0) > 0);
   const cajaActualTieneDatos = cajaActual.frutos !== '100' || cajaActual.calibre !== '' || cajaActual.brix !== '' || cajaActual.color !== '' || String(cajaActual.observacion || '').trim() !== '' || tieneDefectosCajaActual;
   const requiereRevisionCondicion = cajaActualTieneDatos && !haVistoCondicion;
-  const API_URL = window.location.hostname.includes('goldanda.cl')
-    ? 'https://evap.maq.goldanda.cl'
-    : `http://${window.location.hostname || 'localhost'}:3001`;
   const obtenerSiguienteCajaServidor = async (preferredCaja = null) => {
     if (!isColaborativo || !procesoIdBD) return null;
     const extra = Number.isInteger(Number(preferredCaja)) && Number(preferredCaja) > 0 ? `&preferredCaja=${Number(preferredCaja)}` : '';

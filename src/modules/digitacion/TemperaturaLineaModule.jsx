@@ -3,6 +3,7 @@ import {
   ArrowLeft, CalendarDays, ChevronRight, Clock3, FilePlus2, History,
   AlertTriangle, Download, Eye, Menu, PencilLine, Plus, RefreshCw, Save, Search, Thermometer, Trash2
 } from 'lucide-react';
+import { API_URL } from '../../config/api.js';
 
 const PUNTOS_INICIALES = [
   { id: 'agua-variado', codigo: 'agua-variado', nombre: 'T° Agua Vaciado', categoria: 'agua' },
@@ -48,10 +49,6 @@ const COLUMNAS_VISIBLES_BASE = 7;
 const DRAFT_KEY = 'evap_digitacion_temperatura_linea_draft_v1';
 let columnaSeq = 0;
 const crearColumna = (hora = '') => ({ id: `hora-${++columnaSeq}`, hora });
-
-const API_URL = () => window.location.hostname.includes('goldanda.cl')
-  ? 'https://evap.maq.goldanda.cl'
-  : `http://${window.location.hostname || 'localhost'}:3001`;
 
 const FUENTE_INTER = { fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" };
 
@@ -182,7 +179,7 @@ export default function TemperaturaLineaModule({ onAbrirMenu, usuarioId }) {
   const [mostrarConfirmacionSalida, setMostrarConfirmacionSalida] = useState(false);
 
   useEffect(() => {
-    fetch(`${API_URL()}/api/digitacion/temperaturas/puntos`)
+    fetch(`${API_URL}/api/digitacion/temperaturas/puntos`)
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(data => {
         if (Array.isArray(data) && data.length) setPuntos(data.map(p => ({ ...p, codigo: p.codigo || String(p.id) })));
@@ -346,7 +343,7 @@ export default function TemperaturaLineaModule({ onAbrirMenu, usuarioId }) {
           .map(p => ({ puntoId: p.id, codigo: p.codigo, valor: numero(mediciones[columna.id]?.[p.id]) }))
           .filter(m => m.valor !== null);
 
-        const resp = await fetch(`${API_URL()}/api/digitacion/temperaturas/guardar-hora`, {
+        const resp = await fetch(`${API_URL}/api/digitacion/temperaturas/guardar-hora`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ fecha, turno, hora: columna.hora, usuarioId, mediciones: datos })
@@ -368,7 +365,7 @@ export default function TemperaturaLineaModule({ onAbrirMenu, usuarioId }) {
     setCargandoResumen(true);
     setErrorResumen('');
     try {
-      const data = await fetchJsonSeguro(`${API_URL()}/api/digitacion/temperaturas/resumen?limite=240`);
+      const data = await fetchJsonSeguro(`${API_URL}/api/digitacion/temperaturas/resumen?limite=240`);
       const items = Array.isArray(data?.items) ? data.items : [];
       setResumenHistorial(items);
       const fechasUpdate = [data?.ultimaActualizacion, ...items.map(item => item?.updatedAt)]
@@ -389,7 +386,7 @@ export default function TemperaturaLineaModule({ onAbrirMenu, usuarioId }) {
     setErrorHistorial('');
     try {
       try {
-        const dataDia = await fetchJsonSeguro(`${API_URL()}/api/digitacion/temperaturas/dia?fecha=${encodeURIComponent(fechaConsulta)}`);
+        const dataDia = await fetchJsonSeguro(`${API_URL}/api/digitacion/temperaturas/dia?fecha=${encodeURIComponent(fechaConsulta)}`);
         if (dataDia?.turnos) {
           setHistorial({
             Dia: dataDia.turnos.Dia || { fecha: fechaConsulta, turno: 'Dia', horas: [] },
@@ -404,7 +401,7 @@ export default function TemperaturaLineaModule({ onAbrirMenu, usuarioId }) {
       }
 
       const cargarTurno = turnoConsulta => fetchJsonSeguro(
-        `${API_URL()}/api/digitacion/temperaturas?fecha=${encodeURIComponent(fechaConsulta)}&turno=${turnoConsulta}`
+        `${API_URL}/api/digitacion/temperaturas?fecha=${encodeURIComponent(fechaConsulta)}&turno=${turnoConsulta}`
       );
       const [dia, noche] = await Promise.all([cargarTurno('Dia'), cargarTurno('Noche')]);
       setHistorial({ Dia: dia, Noche: noche });
@@ -469,7 +466,7 @@ export default function TemperaturaLineaModule({ onAbrirMenu, usuarioId }) {
         const valores = edicionesHistorial[row.id] || {};
         const datos = puntos.map(p => ({ puntoId: p.id, codigo: p.codigo, valor: numero(valores[p.codigo]) })).filter(m => m.valor !== null);
         if (!datos.length) continue;
-        const resp = await fetch(`${API_URL()}/api/digitacion/temperaturas/guardar-hora`, {
+        const resp = await fetch(`${API_URL}/api/digitacion/temperaturas/guardar-hora`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ fecha: historialFecha, turno: row.turno, hora: row.hora, usuarioId, mediciones: datos })
@@ -494,7 +491,7 @@ export default function TemperaturaLineaModule({ onAbrirMenu, usuarioId }) {
     try {
       const [XLSX, data] = await Promise.all([
         cargarMotorExcel(),
-        fetchJsonSeguro(`${API_URL()}/api/digitacion/temperaturas/exportar`)
+        fetchJsonSeguro(`${API_URL}/api/digitacion/temperaturas/exportar`)
       ]);
       if (!XLSX) throw new Error('No fue posible iniciar el generador de Excel.');
       const resumen = Array.isArray(data?.resumen) ? data.resumen : [];
@@ -685,7 +682,6 @@ export default function TemperaturaLineaModule({ onAbrirMenu, usuarioId }) {
       {exportando ? 'Exportando...' : 'Exportar Excel'}
     </button>
   );
-
 
   if (vista === 'menu') return (
     <div className="w-full h-full bg-[#F8FAFC] overflow-y-auto" style={FUENTE_INTER}>

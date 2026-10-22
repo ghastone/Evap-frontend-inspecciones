@@ -1,39 +1,27 @@
 import React, { useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-
+import { API_URL } from '../../config/api.js';
 export default function GestionVariedades({ variedades, setVariedades }) {
   const [nombreNueva, setNombreNueva] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-
-  // 👇 NUEVO: Variable inteligente que detecta si está en Producción o Desarrollo
-  const API_URL = window.location.hostname.includes('goldanda.cl')
-    ? 'https://evap.maq.goldanda.cl' 
-    : `http://${window.location.hostname || 'localhost'}:3001`;
-
   const agregarVariedad = async (e) => {
     e.preventDefault();
     const nombre = nombreNueva.trim();
-    
     if (!nombre) return;
-    
-    // Verifica si ya existe en la lista para evitar repeticiones innecesarias
     if (variedades.some(v => v.nombre === nombre || v === nombre)) {
       alert('Esta variedad ya se encuentra registrada.');
       return;
     }
-
     setIsLoading(true);
-
     try {
       const res = await fetch(`${API_URL}/api/variedades`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nombre })
       });
-
       if (res.ok) {
-        setVariedades([...variedades, nombre]); 
-        setNombreNueva(''); 
+        setVariedades([...variedades, nombre]);
+        setNombreNueva('');
       } else {
         const errData = await res.json();
         alert(errData.error || 'Error al guardar la variedad en la base de datos.');
@@ -45,16 +33,13 @@ export default function GestionVariedades({ variedades, setVariedades }) {
       setIsLoading(false);
     }
   };
-
   const eliminarVariedad = async (nombre) => {
     const nombreVariedad = typeof nombre === 'object' ? nombre.nombre : nombre;
-
     if (window.confirm(`¿Estás seguro de eliminar la variedad "${nombreVariedad}"?`)) {
       try {
         const res = await fetch(`${API_URL}/api/variedades/${encodeURIComponent(nombreVariedad)}`, {
           method: 'DELETE'
         });
-
         if (res.ok) {
           setVariedades(variedades.filter(v => (typeof v === 'object' ? v.nombre !== nombreVariedad : v !== nombreVariedad)));
         } else {
@@ -66,22 +51,18 @@ export default function GestionVariedades({ variedades, setVariedades }) {
       }
     }
   };
-
   return (
     <div className="bg-white rounded-[32px] p-6 md:p-8 shadow-sm border border-slate-100 max-w-4xl mx-auto space-y-6">
-      
       {/* ENCABEZADO */}
       <div className="flex items-center gap-3 mb-2">
         <div className="w-1.5 h-7 bg-[#FF5500] rounded-full"></div>
         <h2 className="text-2xl font-bold text-slate-900">Variedades Registradas</h2>
       </div>
-
       {/* NUEVO DISEÑO: FORMULARIO DE INGRESO */}
       <form onSubmit={agregarVariedad} className="bg-slate-50/70 border border-slate-200 rounded-2xl p-5 mb-6">
         <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
           Registrar Nueva Variedad
         </h3>
-        
         <div className="flex flex-col sm:flex-row gap-4 items-end">
           <div className="flex-1 w-full">
             <label htmlFor="nombreVariedad" className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase tracking-wider">
@@ -97,7 +78,6 @@ export default function GestionVariedades({ variedades, setVariedades }) {
               className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#FF5500]/40 focus:border-[#FF5500]/60 transition-all shadow-sm"
             />
           </div>
-          
           <button
             type="submit"
             disabled={isLoading}
@@ -108,7 +88,6 @@ export default function GestionVariedades({ variedades, setVariedades }) {
           </button>
         </div>
       </form>
-
       {/* TABLA DE VARIEDADES */}
       <div className="border border-slate-200/70 rounded-2xl overflow-hidden mt-4">
         <table className="w-full text-left border-collapse">
@@ -129,7 +108,6 @@ export default function GestionVariedades({ variedades, setVariedades }) {
             ) : (
               variedades.map((v, index) => {
                 const nombre = typeof v === 'object' ? v.nombre : v;
-                
                 return (
                   <tr key={nombre} className="hover:bg-orange-50/30 transition-colors">
                     <td className="py-4 px-6 font-medium text-slate-400">{index + 1}</td>
@@ -150,7 +128,6 @@ export default function GestionVariedades({ variedades, setVariedades }) {
           </tbody>
         </table>
       </div>
-      
     </div>
   );
 }

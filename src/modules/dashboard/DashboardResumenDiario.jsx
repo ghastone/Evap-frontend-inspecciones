@@ -4,6 +4,7 @@ import {
   BarChart, Bar, ReferenceLine
 } from 'recharts';
 import { Calendar, ChevronDown, ChevronLeft, ChevronRight, Menu, X, RefreshCw } from 'lucide-react';
+import { API_URL } from '../../config/api.js';
 // === HOOK PERSONALIZADO: CONTEO ANIMADO DE NÚMEROS (TICKER) ===
 const useCountUp = (endValue, duration = 1000, decimals = 0) => {
   const [count, setCount] = useState(0);
@@ -43,9 +44,34 @@ const getHoyStr = () => {
 };
 const SUM_CALIDAD = 'Sumatoria de calidad';
 const SUM_CONDICION = 'Sumatoria de condición';
-const API_URL = window.location.hostname.includes('goldanda.cl')
-  ? 'https://evap.maq.goldanda.cl'
-  : `http://${window.location.hostname || 'localhost'}:3001`;
+// Identidad de planta; las direcciones de consulta solo se obtienen de API_URL.
+const PLANTAS_RESUMEN = Object.freeze({ MAQ: 'Maquehua', ROS: 'Rosario' });
+const PLANTA_POR_HOST = Object.freeze({
+  'evap.maq.goldanda.cl': 'MAQ',
+  '192.168.0.10': 'MAQ',
+  'evap.ros.goldanda.cl': 'ROS',
+  '192.168.10.10': 'ROS'
+});
+const validarPlantaResumen = datos => {
+  const plantaId = String(datos?.plantaId || '').trim().toUpperCase();
+  if (!Object.prototype.hasOwnProperty.call(PLANTAS_RESUMEN, plantaId)) {
+    throw new Error('El backend no informó una planta válida (MAQ o ROS). Revisa /api/planta.');
+  }
+  const plantaNombre = PLANTAS_RESUMEN[plantaId];
+  const nombreRecibido = String(datos?.plantaNombre || '').trim();
+  if (nombreRecibido && nombreRecibido.toLowerCase() !== plantaNombre.toLowerCase()) {
+    throw new Error('El identificador y el nombre de planta no coinciden. Revisa /api/planta.');
+  }
+  for (const valor of [window.location.hostname, new URL(API_URL).hostname]) {
+    const host = String(valor || '').toLowerCase().replace(/\.$/, '');
+    const esperada = Object.prototype.hasOwnProperty.call(PLANTA_POR_HOST, host) ? PLANTA_POR_HOST[host] : null;
+    if (esperada && esperada !== plantaId) {
+      throw new Error(`Esta dirección corresponde a ${PLANTAS_RESUMEN[esperada]}, pero el backend informa ${plantaNombre}. Revisa el proxy y PLANTA_ID.`);
+    }
+  }
+  // En localhost se usa la identidad declarada por el backend, sin suponer una planta.
+  return { plantaId, plantaNombre };
+};
 const numeroParametro = valor => {
   const n = Number(String(valor ?? '').replace(',', '.'));
   return Number.isFinite(n) ? n : null;
@@ -230,6 +256,9 @@ export default function DashboardResumenDiario({ onClose, onAbrirMenu }) {
   const [donutHover, setDonutHover] = useState(null);
   const [ultimaSincronizacion, setUltimaSincronizacion] = useState('');
   const [parametrosActuales, setParametrosActuales] = useState({ calidad: [], condicion: [] });
+  const [planta, setPlanta] = useState(null);
+  const [errorCarga, setErrorCarga] = useState('');
+  const [intentoCarga, setIntentoCarga] = useState(0);
   // REFERENCIAS PARA EL SCROLL INFINITO
   const scrollRef = useRef(null);
   const tbodyRef = useRef(null);
@@ -258,31 +287,63 @@ export default function DashboardResumenDiario({ onClose, onAbrirMenu }) {
     setSvgMounted(true);
   }, []);
   useEffect(() => {
+    let activo = true;
+    let tiempoAgotado = false;
+    const controller = new AbortController();
+    const temporizador = setTimeout(() => {
+      tiempoAgotado = true;
+      controller.abort();
+    }, 15000);
+    const opciones = { method: 'GET', cache: 'no-store', redirect: 'error', signal: controller.signal };
     const cargarDatos = async () => {
+      setErrorCarga('');
+      setPlanta(null);
       try {
+        // Confirmar la planta antes de consultar inspecciones y parámetros.
+        const resPlanta = await fetch(`${API_URL}/api/planta`, opciones);
+        if (!resPlanta.ok) throw new Error(`No se pudo identificar la planta (HTTP ${resPlanta.status}). Comprueba que el backend tenga /api/planta.`);
+        const plantaVerificada = validarPlantaResumen(await resPlanta.json());
+        if (!activo) return;
+        if (controller.signal.aborted) throw new Error('Consulta cancelada.');
+        setPlanta(plantaVerificada);
         const [resInspecciones, resParametros] = await Promise.all([
-          fetch(`${API_URL}/api/inspecciones`),
-          fetch(`${API_URL}/api/parametros`)
+          fetch(`${API_URL}/api/inspecciones`, opciones),
+          fetch(`${API_URL}/api/parametros`, opciones)
         ]);
+        if (!resInspecciones.ok) throw new Error(`No se pudieron cargar las inspecciones (HTTP ${resInspecciones.status}).`);
         const data = await resInspecciones.json();
+        if (!Array.isArray(data)) throw new Error('El backend no devolvió una lista de inspecciones válida.');
         const parametros = resParametros.ok ? await resParametros.json() : { calidad: [], condicion: [] };
+        if (!activo) return;
+        if (controller.signal.aborted) throw new Error('Consulta cancelada.');
         setParametrosActuales({
           calidad: Array.isArray(parametros.calidad) ? parametros.calidad : [],
           condicion: Array.isArray(parametros.condicion) ? parametros.condicion : []
         });
-        if (Array.isArray(data)) {
-          setAllInspecciones(data);
-          setUltimaSincronizacion(new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }));
-          const arrFechas = [...new Set(data.map(fechaProceso).filter(Boolean))];
-          setFechasConProcesos(arrFechas);
-          if (!arrFechas.includes(getHoyStr()) && arrFechas.length) setFechaSeleccionada(arrFechas[arrFechas.length - 1]);
-        }
+        setAllInspecciones(data);
+        setUltimaSincronizacion(new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }));
+        const arrFechas = [...new Set(data.map(fechaProceso).filter(Boolean))];
+        setFechasConProcesos(arrFechas);
+        if (!arrFechas.includes(getHoyStr()) && arrFechas.length) setFechaSeleccionada(arrFechas[arrFechas.length - 1]);
       } catch (err) {
+        if (!activo) return;
+        const mensaje = tiempoAgotado
+          ? 'El servidor no respondió a tiempo. Revisa la conexión e intenta nuevamente.'
+          : err instanceof SyntaxError
+            ? 'El servidor no devolvió JSON válido. Revisa el backend y el proxy /api.'
+            : err instanceof TypeError
+              ? 'No se pudo cargar el resumen diario. Revisa la conexión y la respuesta del backend.'
+              : err.message || 'No se pudo cargar el resumen diario.';
+        setErrorCarga(mensaje);
         console.error('Error al cargar resumen diario:', err);
+        controller.abort();
+      } finally {
+        clearTimeout(temporizador);
       }
     };
     cargarDatos();
-  }, []);
+    return () => { activo = false; clearTimeout(temporizador); controller.abort(); };
+  }, [intentoCarga]);
   useEffect(() => {
     if (!allInspecciones.length) return;
     const procesosDelDia = allInspecciones.filter(p => fechaProceso(p) === fechaSeleccionada);
@@ -475,11 +536,11 @@ export default function DashboardResumenDiario({ onClose, onAbrirMenu }) {
             <div>
               <h2 className="text-[18px] sm:text-[20px] md:text-[22px] font-black text-[#0f172a] tracking-tight uppercase">Resumen diario de calidad</h2>
               <div className="flex items-center gap-2 mt-1">
-                <p className="text-[14px] md:text-[15px] text-[#64748b] font-medium">Planta Maquehua</p>
+                <p className="text-[14px] md:text-[15px] text-[#64748b] font-medium">{planta ? `Planta ${planta.plantaNombre}` : errorCarga ? 'Planta sin identificar' : 'Verificando planta...'}</p>
                 <span className="text-[#94a3b8] text-sm">•</span>
                 <p className="text-[13px] text-[#64748b] flex items-center gap-1.5 bg-[#f1f5f9] px-2 py-0.5 rounded-md border border-[#e2e8f0]">
                   <RefreshCw className="w-3.5 h-3.5 text-[#94a3b8]" />
-                  Última sincronización: <span className="font-bold text-[#0f172a]">{ultimaSincronizacion || 'Cargando...'}</span>
+                  Última sincronización: <span className="font-bold text-[#0f172a]">{ultimaSincronizacion || (errorCarga ? 'Sin sincronizar' : 'Cargando...')}</span>
                 </p>
               </div>
             </div>
@@ -507,6 +568,12 @@ export default function DashboardResumenDiario({ onClose, onAbrirMenu }) {
               )}
             </div>
           </div>
+          {errorCarga && (
+            <div role="alert" className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
+              <p className="text-sm font-semibold">{errorCarga}</p>
+              <button type="button" onClick={() => setIntentoCarga(v => v + 1)} className="shrink-0 rounded-lg border border-red-200 bg-white px-3 py-2 text-xs font-bold hover:bg-red-100">Reintentar</button>
+            </div>
+          )}
           {/* ================= SECCIÓN 1: KPIs ================= */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 lg:gap-4 relative z-10 mt-2">
             <div className="kpi-card bg-[#ffffff] border border-[#f1f5f9] rounded-2xl px-4 py-2 flex flex-col items-center justify-center min-h-[82px] xl:min-h-[68px] relative shadow-sm">

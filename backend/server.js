@@ -1,4 +1,88 @@
-require('dotenv').config();
+// EVAP: cargar el .env del backend, no el de la carpeta de la terminal.
+const path = require('path');
+const dotenv = require('dotenv');
+const RUTA_ENV = path.join(__dirname, '.env');
+const CLAVES_CONFIGURACION = [
+  'PLANTA_ID', 'DB_HOST', 'DB_PORT', 'DB_NAME',
+  'DB_USER', 'DB_PASSWORD', 'PORT'
+];
+
+// Conservar los valores previos para detectar conflictos sin sobrescribirlos.
+const entornoPrevio = {};
+for (const clave of CLAVES_CONFIGURACION) {
+  if (Object.prototype.hasOwnProperty.call(process.env, clave)) {
+    entornoPrevio[clave] = process.env[clave];
+  }
+}
+
+const resultadoEnv = dotenv.config({
+  path: RUTA_ENV,
+  encoding: 'utf8',
+  quiet: true,
+  override: false
+});
+
+if (resultadoEnv.error) {
+  throw new Error(
+    `No se pudo leer el archivo ${RUTA_ENV} ` +
+    `(${resultadoEnv.error.code || 'ERROR_LECTURA'}). ` +
+    'Comprueba que exista junto a server.js, que se llame .env (no .env.txt) ' +
+    'y que tengas permiso para leerlo.'
+  );
+}
+
+const valoresArchivo = resultadoEnv.parsed || {};
+const PLANTAS_VALIDAS = { MAQ: 'Maquehua', ROS: 'Rosario' };
+const PLANTA_ID = String(process.env.PLANTA_ID || '').trim().toUpperCase();
+
+// Diagnostico limitado: nunca imprimir process.env ni el objeto parsed completo.
+console.log(`[EVAP] Archivo .env: ${RUTA_ENV}`);
+console.log(`[EVAP] PLANTA_ID archivo: ${JSON.stringify(valoresArchivo.PLANTA_ID ?? null)}`);
+console.log(`[EVAP] PLANTA_ID efectivo: ${JSON.stringify(PLANTA_ID)}`);
+
+const valorComparable = (clave, valor) => clave === 'PLANTA_ID'
+  ? String(valor).trim().toUpperCase()
+  : String(valor);
+const conflictos = CLAVES_CONFIGURACION.filter(clave =>
+  Object.prototype.hasOwnProperty.call(entornoPrevio, clave) &&
+  Object.prototype.hasOwnProperty.call(valoresArchivo, clave) &&
+  valorComparable(clave, entornoPrevio[clave]) !== valorComparable(clave, valoresArchivo[clave])
+);
+
+if (conflictos.length) {
+  throw new Error(
+    `Conflicto entre las variables de la terminal/sistema y ${RUTA_ENV}: ` +
+    `${conflictos.join(', ')}. ` +
+    'No se sobrescribieron automaticamente. Corrige la variable indicada ' +
+    'en la terminal o en .env para usar la planta y la base deseadas. ' +
+    'No se ha conectado a PostgreSQL.'
+  );
+}
+
+if (!Object.prototype.hasOwnProperty.call(PLANTAS_VALIDAS, PLANTA_ID)) {
+  throw new Error(
+    `PLANTA_ID debe ser MAQ o ROS. Revisa el archivo ${RUTA_ENV}, ` +
+    'guardalo y vuelve a ejecutar. Los valores leidos aparecen arriba. ' +
+    'No se ha conectado a PostgreSQL.'
+  );
+}
+for (const variable of ['DB_HOST', 'DB_USER', 'DB_NAME', 'DB_PASSWORD']) {
+  if (!process.env[variable]) {
+    throw new Error(`Falta configurar ${variable} en ${RUTA_ENV}`);
+  }
+}
+const PLANTA_NOMBRE = PLANTAS_VALIDAS[PLANTA_ID];
+
+console.log(`[EVAP] Planta: ${PLANTA_NOMBRE} (${PLANTA_ID})`);
+console.log(`[EVAP] DB_HOST: ${process.env.DB_HOST}`);
+console.log(`[EVAP] DB_NAME: ${process.env.DB_NAME}`);
+
+// Comprobacion local: finaliza antes de cargar Express/pg y de inicializar la BD.
+if (process.argv.includes('--verificar-config')) {
+  console.log('OK: configuracion valida. No se conecto a PostgreSQL ni se inicio la API.');
+  process.exit(0);
+}
+
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -12,6 +96,11 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD,
   port: process.env.DB_PORT,
 });
+// Identidad operativa: no publica nombres de bases, usuarios ni contraseñas.
+app.get('/api/planta', (_req, res) => {
+  res.json({ plantaId: PLANTA_ID, plantaNombre: PLANTA_NOMBRE });
+});
+
 const SUM_CALIDAD = 'Sumatoria de calidad';
 const SUM_CONDICION = 'Sumatoria de condición';
 const normalizarNombre = nombre => String(nombre || '').trim().toLocaleLowerCase('es');
@@ -450,7 +539,7 @@ async function guardarHoraTemperatura(client, payload = {}) {
 // Conectar a la DB y asegurar que existan las tablas necesarias
 pool.connect()
   .then(async (client) => {
-    console.log('✅ ¡Conectado a la base de datos PostgreSQL en', process.env.DB_HOST, '!');
+    console.log(`✅ EVAP ${PLANTA_NOMBRE} (${PLANTA_ID}): conexión PostgreSQL establecida en ${process.env.DB_HOST}.`);
     try {
       // Auto-crear la tabla para guardar parámetros en formato JSON si no existe
       await client.query(`
@@ -1823,5 +1912,5 @@ app.get('/api/procesos/:id/informe', async (req, res) => {
 });
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Servidor Backend corriendo en el puerto ${PORT} y escuchando red local`);
+  console.log(`🚀 EVAP ${PLANTA_NOMBRE} (${PLANTA_ID}): backend en puerto ${PORT}`);
 });

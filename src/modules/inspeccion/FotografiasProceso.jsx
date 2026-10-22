@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Camera, CheckCircle2, Image as ImageIcon, Loader2, Plus, X } from 'lucide-react';
+import { API_URL } from '../../config/api.js';
 
 const comprimirImagen = file => new Promise((resolve, reject) => {
   const reader = new FileReader();
@@ -25,7 +26,7 @@ const comprimirImagen = file => new Promise((resolve, reject) => {
   reader.readAsDataURL(file);
 });
 
-export default function FotografiasProceso({ apiUrl, procesoId, lightOk = false, darkOk = false, disabled = false, onEstadoChange, onLocalPhoto }) {
+export default function FotografiasProceso({ apiUrl = API_URL, procesoId, lightOk = false, darkOk = false, disabled = false, onEstadoChange, onLocalPhoto }) {
   const refs = { lightCam: useRef(null), lightFile: useRef(null), darkCam: useRef(null), darkFile: useRef(null) };
   const [estado, setEstado] = useState({ light: lightOk, dark: darkOk });
   const [subiendo, setSubiendo] = useState(null);

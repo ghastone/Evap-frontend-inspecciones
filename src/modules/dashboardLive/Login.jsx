@@ -1,5 +1,85 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User, Lock, EyeOff, Eye, Building2, ShieldCheck, Check } from 'lucide-react';
+import { API_URL } from '../../config/api.js';
+
+// Estos nombres identifican la planta; NO seleccionan una API ni una base de datos.
+// La direccion de todas las solicitudes proviene exclusivamente de config/api.js.
+const NOMBRES_PLANTA = Object.freeze({ MAQ: 'Maquehua', ROS: 'Rosario' });
+const PLANTA_POR_HOST = Object.freeze({
+  'evap.maq.goldanda.cl': 'MAQ',
+  '192.168.0.10': 'MAQ',
+  'evap.ros.goldanda.cl': 'ROS',
+  '192.168.10.10': 'ROS',
+});
+const TIEMPO_ESPERA_MS = 15000;
+
+/** Solicita JSON a la API seleccionada, sin cambiar de planta ni seguir redirecciones. */
+async function solicitarJson(ruta, opciones = {}, signalExterno) {
+  const controller = new AbortController();
+  let tiempoAgotado = false;
+  const abortar = () => controller.abort();
+  if (signalExterno?.aborted) controller.abort();
+  signalExterno?.addEventListener('abort', abortar, { once: true });
+  const temporizador = setTimeout(() => {
+    tiempoAgotado = true;
+    controller.abort();
+  }, TIEMPO_ESPERA_MS);
+
+  try {
+    const response = await fetch(`${API_URL}${ruta}`, {
+      ...opciones,
+      cache: 'no-store',
+      redirect: 'error',
+      signal: controller.signal,
+    });
+    let data;
+    try {
+      data = await response.json();
+    } catch (err) {
+      if (controller.signal.aborted) throw err;
+      throw new Error(
+        `El servidor no devolvió JSON válido en ${ruta} (HTTP ${response.status}). Revisa el backend y el proxy /api.`
+      );
+    }
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new Error(`La respuesta de ${ruta} no tiene el formato esperado.`);
+    }
+    return { response, data };
+  } catch (err) {
+    if (tiempoAgotado && !signalExterno?.aborted) {
+      throw new Error('El servidor demoró demasiado en responder. Comprueba la conexión e inténtalo nuevamente.');
+    }
+    if (controller.signal.aborted) throw err;
+    if (err instanceof TypeError) {
+      throw new Error('No se pudo conectar con el servidor backend. Revisa la conexión y la configuración de la API.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(temporizador);
+    signalExterno?.removeEventListener('abort', abortar);
+  }
+}
+
+/** Confirma la identidad declarada por el backend; no consulta credenciales ni PostgreSQL. */
+async function consultarPlanta(signal) {
+  const { response, data } = await solicitarJson('/api/planta', { method: 'GET' }, signal);
+  if (!response.ok) {
+    throw new Error(`No se pudo verificar la planta (HTTP ${response.status}). Comprueba que el backend tenga disponible /api/planta.`);
+  }
+  const plantaId = String(data.plantaId || '').trim().toUpperCase();
+  if (!Object.prototype.hasOwnProperty.call(NOMBRES_PLANTA, plantaId)) {
+    throw new Error('El backend no informó una planta válida: debe indicar MAQ o ROS.');
+  }
+  const hostname = window.location.hostname.toLowerCase().replace(/\.$/, '');
+  const esperada = Object.prototype.hasOwnProperty.call(PLANTA_POR_HOST, hostname)
+    ? PLANTA_POR_HOST[hostname]
+    : null;
+  if (esperada && esperada !== plantaId) {
+    throw new Error(`Esta dirección corresponde a ${NOMBRES_PLANTA[esperada]}, pero el backend informa ${NOMBRES_PLANTA[plantaId]}. No se enviaron credenciales. Revisa el proxy y PLANTA_ID.`);
+  }
+  // En localhost o en otro equipo de desarrollo, la planta la declara el backend.
+  return { plantaId, plantaNombre: NOMBRES_PLANTA[plantaId] };
+}
 
 export default function Login({ onLogin }) {
   const [username, setUsername] = useState('');
@@ -8,50 +88,91 @@ export default function Login({ onLogin }) {
   const [recordarSesion, setRecordarSesion] = useState(false);
   const [error, setError] = useState('');
   const [cargando, setCargando] = useState(false);
+  const [planta, setPlanta] = useState(null);
+  const [errorPlanta, setErrorPlanta] = useState('');
+  const [verificandoPlanta, setVerificandoPlanta] = useState(true);
+  const solicitudLoginRef = useRef(null);
+
+  useEffect(() => {
+    let activo = true;
+    const controller = new AbortController();
+    consultarPlanta(controller.signal)
+      .then((resultado) => {
+        if (!activo) return;
+        setPlanta(resultado);
+        setErrorPlanta('');
+      })
+      .catch((err) => {
+        if (!activo || controller.signal.aborted) return;
+        setPlanta(null);
+        setErrorPlanta(err.message || 'No se pudo identificar la planta.');
+      })
+      .finally(() => {
+        if (activo) setVerificandoPlanta(false);
+      });
+    return () => {
+      activo = false;
+      controller.abort();
+      solicitudLoginRef.current?.abort();
+    };
+  }, []);
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    if (verificandoPlanta || solicitudLoginRef.current) return;
     setError('');
-
     if (!username.trim() || !password.trim()) {
       setError('Por favor, ingresa tu usuario y contraseña.');
       return;
     }
-
+    const controller = new AbortController();
+    solicitudLoginRef.current = controller;
     setCargando(true);
+    setErrorPlanta('');
 
     try {
-      // Detección automática y robusta para red local e internet
-      const hostname = window.location.hostname || 'localhost';
-      
-      const API_URL = hostname.includes('goldanda.cl')
-        ? 'https://evap.maq.goldanda.cl' 
-        : `http://${hostname}:3001`;
+      // Se vuelve a comprobar ANTES de enviar usuario y clave. Un fallo permite
+      // reintentar con el mismo boton; nunca se busca un backend de otra planta.
+      let plantaConfirmada;
+      try {
+        plantaConfirmada = await consultarPlanta(controller.signal);
+      } catch (err) {
+        if (!controller.signal.aborted) setPlanta(null);
+        throw err;
+      }
+      if (controller.signal.aborted) return;
+      setPlanta(plantaConfirmada);
+      if (planta && planta.plantaId !== plantaConfirmada.plantaId) {
+        setError(`El backend cambió de ${planta.plantaNombre} a ${plantaConfirmada.plantaNombre}. Revisa la planta mostrada y pulsa Ingresar nuevamente. No se enviaron credenciales.`);
+        return;
+      }
 
-      const response = await fetch(`${API_URL}/api/login`, {
+      const { response, data } = await solicitarJson('/api/login', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ 
-          username: username.trim(), 
-          password: password.trim() 
-        })
-      });
-
-      const data = await response.json();
-
-      if (response.ok && data.success) {
-        // Pasa todo el objeto del usuario devuelto por PostgreSQL (id, username, role, permisos)
+        headers: { 'Content-Type': 'application/json' },
+        // Se conserva el contrato y el tratamiento de espacios del backend actual.
+        body: JSON.stringify({ username: username.trim(), password: password.trim() }),
+      }, controller.signal);
+      if (controller.signal.aborted) return;
+      if (response.ok && data.success === true) {
+        if (!data.user || typeof data.user !== 'object' || Array.isArray(data.user)) {
+          throw new Error('El servidor confirmó el acceso, pero no devolvió los datos del usuario.');
+        }
+        // App.jsx sigue recibiendo exactamente el objeto de usuario del backend.
         onLogin(data.user);
       } else {
-        setError(data.message || 'Usuario o contraseña incorrectos.');
+        setError(typeof data.message === 'string' && data.message
+          ? data.message
+          : 'Usuario o contraseña incorrectos.');
       }
     } catch (err) {
-      console.error("Error al iniciar sesión:", err);
-      setError('No se pudo conectar con el servidor backend.');
+      if (!controller.signal.aborted) {
+        console.error('Error al iniciar sesión:', err);
+        setError(err.message || 'No se pudo conectar con el servidor backend.');
+      }
     } finally {
-      setCargando(false);
+      if (solicitudLoginRef.current === controller) solicitudLoginRef.current = null;
+      if (!controller.signal.aborted) setCargando(false);
     }
   };
 
@@ -163,14 +284,14 @@ export default function Login({ onLogin }) {
             </div>
             <input
               type="text"
-              defaultValue="Maquehua"
+              value={planta?.plantaNombre || (verificandoPlanta ? 'Verificando planta...' : 'No disponible')}
               readOnly
               className="w-full pl-11 pr-4 py-3.5 bg-slate-100/60 border border-slate-200/50 rounded-2xl text-[14px] font-medium text-slate-500 focus:outline-none cursor-not-allowed select-none"
             />
           </div>
 
           {/* Error de validación */}
-          {error && <p className="text-red-500 text-[13px] text-center font-bold bg-red-50 py-2 rounded-xl border border-red-100 animate-fade-in">{error}</p>}
+          {(error || errorPlanta) && <p className="text-red-500 text-[13px] text-center font-bold bg-red-50 py-2 rounded-xl border border-red-100 animate-fade-in">{error || errorPlanta}</p>}
 
           {/* Opciones extra */}
           <div className="flex items-center justify-between pt-1 pb-3">
@@ -195,7 +316,7 @@ export default function Login({ onLogin }) {
           {/* Botón Ingresar */}
           <button
             type="submit"
-            disabled={cargando}
+            disabled={cargando || verificandoPlanta}
             className="w-full bg-gradient-to-r from-[#E96008] to-[#d95604] hover:shadow-lg hover:shadow-[#E96008]/25 hover:-translate-y-0.5 disabled:opacity-60 disabled:hover:translate-y-0 disabled:hover:shadow-none text-white text-[15px] font-bold py-3.5 rounded-full active:scale-[0.98] transition-all duration-300 flex items-center justify-center"
           >
             {cargando ? (

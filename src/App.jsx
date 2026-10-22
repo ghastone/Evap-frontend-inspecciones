@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { API_URL } from './config/api.js';
 import Login from './modules/dashboardLive/Login';
 import DashboardLiveView from './modules/dashboardLive/DashboardLiveView';
 import DashboardResumenDiario from './modules/dashboard/DashboardResumenDiario';
@@ -89,9 +90,6 @@ export default function App() {
   const forzarCierrePorInactividad = () => {
     localStorage.clear();
     sessionStorage.clear();
-    const API_URL = window.location.hostname.includes('goldanda.cl')
-      ? 'https://evap.maq.goldanda.cl'
-      : `http://${window.location.hostname || 'localhost'}:3001`;
     fetch(`${API_URL}/api/live`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -159,9 +157,6 @@ export default function App() {
     localStorage.removeItem('dashboardLive');
     localStorage.removeItem('inspeccionActiva');
     sessionStorage.clear();
-    const API_URL = window.location.hostname.includes('goldanda.cl')
-      ? 'https://evap.maq.goldanda.cl'
-      : `http://${window.location.hostname || 'localhost'}:3001`;
     fetch(`${API_URL}/api/live`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -180,9 +175,6 @@ export default function App() {
   });
   const cargarDatosMaestros = async () => {
     try {
-      const API_URL = window.location.hostname.includes('goldanda.cl')
-        ? 'https://evap.maq.goldanda.cl'
-        : `http://${window.location.hostname || 'localhost'}:3001`;
       const [expRes, varRes, hueRes, inspRes] = await Promise.all([
         fetch(`${API_URL}/api/exportadoras`),
         fetch(`${API_URL}/api/variedades`),
@@ -216,7 +208,6 @@ export default function App() {
   const handleLogout = () => setMostrarConfirmacionLogout(true);
   const confirmarLogout = () => {
     setMostrarConfirmacionLogout(false); localStorage.clear(); sessionStorage.clear();
-    const API_URL=window.location.hostname.includes('goldanda.cl')?'https://evap.maq.goldanda.cl':`http://${window.location.hostname||'localhost'}:3001`;
     fetch(`${API_URL}/api/live`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).catch(err=>console.log('Live limpiado (Logout)',err));
     setUser(null); setCurrentView('home'); setIsCollapsed(false); setShowAjustes(false); setDashboardsAbierto(true); setShowDrawer(false); setDatosProcesoActivo(null);
   };
@@ -316,6 +307,7 @@ export default function App() {
         `}</style>
         {currentView === 'nuevo-proceso' && puedeCrearProceso && (
           <NuevoProceso
+            usuarioActual={user}
             exportadoras={dbData.exportadoras}
             productores={dbData.productores}
             variedades={dbData.variedades}
@@ -329,6 +321,7 @@ export default function App() {
         )}
         {currentView === 'inspeccion' && datosProcesoActivo && (
           <InspeccionModule
+            usuarioActual={user}
             datosProceso={datosProcesoActivo}
             onAbrirMenu={() => setShowDrawer(true)}
             onVolver={() => {
@@ -649,7 +642,7 @@ export default function App() {
         )}
         {/* === RENDERIZADO DE MÓDULOS SEGÚN VISTA === */}
         {currentView === 'historial' && puedeVerHistorial && (
-          <HistorialProcesosView onVerResumen={(proceso)=>console.log('Resumen:',proceso)} userRole={user.role} usuarioId={user.id} puedeEditar={puedeEditarInformes} puedeEliminar={puedeEliminarProcesos}/>
+          <HistorialProcesosView onVerResumen={(proceso)=>console.log('Resumen:',proceso)} userRole={user.role} usuarioId={user.id} usuarioNombre={user.username} puedeEditar={puedeEditarInformes} puedeEliminar={puedeEliminarProcesos}/>
         )}
         {currentView === 'digitacion-temperatura' && puedeDigitacion && (
           <TemperaturaLineaModule usuarioId={user.id} />

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 
 import { BarChart, Bar, XAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
+import { API_URL } from '../../config/api.js';
 
 const STOPWORDS_OBS=new Set(['de','del','la','las','el','los','un','una','unos','unas','en','con','por','para','y','o','a','al','se','que','muy','caja','cajas','fruta','presenta','presentan','observa','observan','aprecia','aprecian','detecta','detectan']);
 const normalizarObs=texto=>String(texto||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9ñ\s]/gi,' ').replace(/\s+/g,' ').trim();
@@ -12,9 +13,6 @@ const analizarObservaciones=cajas=>{const registros=(Array.isArray(cajas)?cajas:
 
 const SUM_CALIDAD = 'Sumatoria de calidad';
 const SUM_CONDICION = 'Sumatoria de condición';
-const API_URL = window.location.hostname.includes('goldanda.cl')
-  ? 'https://evap.maq.goldanda.cl'
-  : `http://${window.location.hostname || 'localhost'}:3001`;
 
 const numeroParametro = valor => {
   const n = Number(String(valor ?? '').replace(',', '.'));
@@ -194,7 +192,10 @@ const PlantillaInforme = React.forwardRef(({ datos, parametros: parametrosProp }
 
   const exportadora = datos.exportadora || '-';
 
-  const planta = datos.planta || 'Maquehua';
+  // El historial entrega la identidad verificada antes de montar el informe.
+  // No se deduce Maquehua en localhost ni se elige una planta por defecto.
+  const planta = [datos.planta, datos.plantaNombre]
+    .find(valor => typeof valor === 'string' && valor.trim())?.trim() || 'Sin identificar';
 
   const csg = datos.csg || '-';
 
