@@ -7,6 +7,14 @@ import FotografiasProceso from './FotografiasProceso';
 import { API_URL } from '../../config/api.js';
 const SUM_CALIDAD = 'Sumatoria de calidad';
 const SUM_CONDICION = 'Sumatoria de condición';
+// El valor 0 °C es válido. Acepta coma/punto y hasta dos decimales.
+const leerTempPulpa = valor => {
+  if (valor == null || String(valor).trim() === '') return null;
+  const texto = String(valor).trim().replace(',', '.');
+  if (!/^-?\d{1,4}(?:\.\d{1,2})?$/.test(texto)) return null;
+  const numero = Number(texto);
+  return Number.isFinite(numero) ? numero : null;
+};
 const crearMapaDefectos = nombres => Object.fromEntries(nombres.map(nombre => [nombre, 0]));
 const sincronizarMapa = (actual, nombres) => Object.fromEntries(nombres.map(nombre => [nombre, actual?.[nombre] ?? 0]));
 const sumarDefectos = (mapa, nombres) => nombres.reduce((total, nombre) => total + (parseInt(mapa?.[nombre]) || 0), 0);
@@ -58,8 +66,8 @@ export default function InspeccionModule({
   // En colaborativo el número visible viene reservado por el servidor para este inspector.
   const numCajaInicial = isColaborativo ? (nextCajaColaborativa || 1) : (draftInit?.cajaActual?.numCaja || 1);
   const [cajaActual, setCajaActual] = useState(() => {
-    const base = draftInit?.cajaActual || { frutos: '100', calibre: '', brix: '', color: '', observacion: '', defCalidad: {}, defCondicion: {} };
-    return { ...base, observacion: base.observacion || '', numCaja: numCajaInicial };
+    const base = draftInit?.cajaActual || { frutos: '100', calibre: '', tempPulpa: '', brix: '', color: '', observacion: '', defCalidad: {}, defCondicion: {} };
+    return { ...base, tempPulpa: base.tempPulpa ?? '', observacion: base.observacion || '', numCaja: numCajaInicial };
   });
   const [horaInicio, setHoraInicio] = useState(draftInit?.horaInicio || horaInicioAsignada || null);
   const [tabDefectos, setTabDefectos] = useState('calidad');
@@ -92,6 +100,7 @@ export default function InspeccionModule({
     numCaja,
     frutos: '100',
     calibre: '',
+    tempPulpa: '',
     brix: '',
     color: '',
     observacion: '',
@@ -102,9 +111,9 @@ export default function InspeccionModule({
   const [cajaIndexEdicion, setCajaIndexEdicion] = useState(null);
   const [tabDefectosEdicion, setTabDefectosEdicion] = useState('calidad');
   const hideSpinners = "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
-  const headerCompleto = cajaActual.frutos !== '' && cajaActual.calibre !== '' && cajaActual.color !== '' && cajaActual.brix !== '';
+  const headerCompleto = cajaActual.frutos !== '' && cajaActual.calibre !== '' && leerTempPulpa(cajaActual.tempPulpa) !== null && cajaActual.color !== '' && cajaActual.brix !== '';
   const tieneDefectosCajaActual = [...Object.values(cajaActual.defCalidad || {}), ...Object.values(cajaActual.defCondicion || {})].some(v => (parseInt(v, 10) || 0) > 0);
-  const cajaActualTieneDatos = cajaActual.frutos !== '100' || cajaActual.calibre !== '' || cajaActual.brix !== '' || cajaActual.color !== '' || String(cajaActual.observacion || '').trim() !== '' || tieneDefectosCajaActual;
+  const cajaActualTieneDatos = cajaActual.frutos !== '100' || cajaActual.calibre !== '' || String(cajaActual.tempPulpa ?? '') !== '' || cajaActual.brix !== '' || cajaActual.color !== '' || String(cajaActual.observacion || '').trim() !== '' || tieneDefectosCajaActual;
   const requiereRevisionCondicion = cajaActualTieneDatos && !haVistoCondicion;
   const obtenerSiguienteCajaServidor = async (preferredCaja = null) => {
     if (!isColaborativo || !procesoIdBD) return null;
@@ -177,7 +186,13 @@ export default function InspeccionModule({
         if (res.ok) {
           setUsuariosEnInspeccion(Number(data.usuariosEnProceso || data.inspectoresActivos) || 1);
           if (Array.isArray(data.usuariosProceso)) setUsuariosProceso(data.usuariosProceso.length ? data.usuariosProceso : [{ username: usuarioActual?.username || datosProceso?.username || 'Usuario' }]);
-          setFotosProceso({ light: Boolean(data.fotoLight), dark: Boolean(data.fotoDark) });
+          // Las fotos solo se agregan/reemplazan: una respuesta de polling
+          // desactualizada no debe apagar una foto ya confirmada por el POST.
+          setFotosProceso(prev => {
+            const light = prev.light || Boolean(data.fotoLight);
+            const dark = prev.dark || Boolean(data.fotoDark);
+            return prev.light === light && prev.dark === dark ? prev : { light, dark };
+          });
           const totalServidor = Number(data.cajasGuardadas);
           if (Number.isInteger(totalServidor) && totalServidor >= 0 && totalServidor !== cajasGuardadasRef.current) {
             const detalleRes = await fetch(`${API_URL}/api/procesos/colaborativo/activo-detalle`, { cache: 'no-store' });
@@ -289,11 +304,18 @@ export default function InspeccionModule({
     if (esEdicion) setCajaEnEdicion(prev => ({ ...prev, brix: val }));
     else setCajaActual(prev => ({ ...prev, brix: val }));
   };
+  const manejarCambioTempPulpa = (e, esEdicion = false) => {
+    const valor = e.target.value;
+    if (!/^-?\d{0,4}(?:[.,]\d{0,2})?$/.test(valor)) return;
+    if (!esEdicion) registrarInicioProceso();
+    if (esEdicion) setCajaEnEdicion(prev => ({ ...prev, tempPulpa: valor }));
+    else setCajaActual(prev => ({ ...prev, tempPulpa: valor }));
+  };
   // 🔥 NUEVA LÓGICA DE GUARDADO EN TIEMPO REAL CAJA POR CAJA
   const guardarCaja = async () => {
     if (procesoCerradoRemotamente) return;
     if (!parametrosListos) return alert("Los parámetros de calificación aún no están disponibles.");
-    if (!headerCompleto) return alert("Completa Muestra, Calibre, Color de embalaje y °Brix.");
+    if (!headerCompleto) return alert("Completa Muestra, Calibre, Temp pulpa (°C), Color de embalaje y °Brix.");
     const brixVal = parseFloat(cajaActual.brix);
     if (!isNaN(brixVal) && brixVal > 30) { if (!window.confirm(`El valor de °Brix ingresado (${brixVal}) es superior a 30. ¿Estás seguro?`)) return; }
     registrarInicioProceso();
@@ -344,18 +366,28 @@ export default function InspeccionModule({
   const handleEdicionCampo = (campo, valor) => setCajaEnEdicion(prev => ({ ...prev, [campo]: valor }));
   const handleEdicionDefecto = (tipoDef, def, valor) => { const val = valor === '' ? '' : Math.max(0, parseInt(valor) || 0); setCajaEnEdicion(prev => ({ ...prev, [tipoDef]: { ...prev[tipoDef], [def]: val } })); };
   const guardarCambiosCajaEditada = async () => {
+    const valorEdicion = cajaEnEdicion.tempPulpa;
+    const tempPulpaEdicion = leerTempPulpa(valorEdicion);
+    if (valorEdicion != null && String(valorEdicion).trim() !== '' && tempPulpaEdicion === null) {
+      return alert('Temp pulpa debe ser un número válido en °C (hasta dos decimales).');
+    }
+    // No se obliga a completar retroactivamente registros anteriores a esta versión.
+    const tempAnterior = cajas[cajaIndexEdicion]?.tempPulpa;
+    if (tempAnterior != null && String(tempAnterior).trim() !== '' && tempPulpaEdicion === null) {
+      return alert('La caja ya tiene Temp pulpa registrada. Ingresa un valor antes de aplicar cambios.');
+    }
     const brixVal = parseFloat(cajaEnEdicion.brix);
     if (!isNaN(brixVal) && brixVal > 30) { if (!window.confirm(`El valor de °Brix (${brixVal}) es mayor a 30. ¿Es correcto?`)) return; }
-    let cajaActualizada = { ...cajaEnEdicion, observacion: String(cajaEnEdicion.observacion || '').slice(0, 60) };
+    let cajaActualizada = { ...cajaEnEdicion, tempPulpa: tempPulpaEdicion, observacion: String(cajaEnEdicion.observacion || '').slice(0, 60) };
     if (isColaborativo && cajaActualizada.id) {
       try {
         const res = await fetch(`${API_URL}/api/procesos/colaborativo/caja/${cajaActualizada.id}/observacion`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ observacion: cajaActualizada.observacion })
+          body: JSON.stringify({ observacion: cajaActualizada.observacion, tempPulpa: cajaActualizada.tempPulpa })
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return alert(data.error || 'No fue posible actualizar la observación de la caja.');
-        cajaActualizada = { ...cajaActualizada, observacion: data.observacion || '' };
+        cajaActualizada = { ...cajaActualizada, observacion: data.observacion || '', tempPulpa: data.tempPulpa ?? null };
       } catch (error) {
         console.error(error);
         return alert('No fue posible sincronizar la observación con el servidor.');
@@ -514,6 +546,9 @@ export default function InspeccionModule({
   const totalDefCalidadActual = sumarDefectos(cajaActual.defCalidad, nombresCalidad);
   const totalDefCondicionActual = sumarDefectos(cajaActual.defCondicion, nombresCondicion);
   const abrirModalFinalizar = async () => {
+    if (cajaActualTieneDatos && !headerCompleto) {
+      return alert('La caja actual está incompleta. Completa Muestra, Calibre, Temp pulpa (°C), Color y °Brix antes de finalizar.');
+    }
     if (requiereRevisionCondicion) { setTabDefectos('condicion'); return; }
     if (isColaborativo && procesoIdBD) {
       try {
@@ -521,7 +556,11 @@ export default function InspeccionModule({
         const data = await res.json().catch(() => ({}));
         if (res.status === 404 || (res.ok && data.estado !== 'En curso')) return marcarProcesoCerradoRemotamente(data.estado || 'Finalizado');
         const estadoFotos = { light: Boolean(data.fotoLight), dark: Boolean(data.fotoDark) };
-        setFotosProceso(estadoFotos);
+        setFotosProceso(prev => {
+          const light = prev.light || estadoFotos.light;
+          const dark = prev.dark || estadoFotos.dark;
+          return prev.light === light && prev.dark === dark ? prev : { light, dark };
+        });
         setUsuariosEnInspeccion(Number(data.inspectoresActivos) || 1);
         setOtrosInspectoresFinalizacion(Number(data.otrosInspectoresActivos) || 0);
         if (!estadoFotos.light || !estadoFotos.dark) return alert('Debes ingresar las fotografías de embalaje Light y Dark antes de finalizar el proceso.');
@@ -536,6 +575,7 @@ export default function InspeccionModule({
   const enviarInspeccionAlServidor = async (forzarConfirmado = false) => {
     if (procesoCerradoRemotamente) return;
     if (!parametrosListos) return alert("No se puede finalizar sin los parámetros de calificación.");
+    if (cajaActualTieneDatos && !headerCompleto) return alert('Completa Temp pulpa (°C) y los otros datos de la caja actual antes de finalizar.');
     if (!fotosCompletas) return alert('Debes ingresar las fotografías de embalaje Light y Dark antes de finalizar el proceso.');
     if (requiereRevisionCondicion) {
       setTabDefectos('condicion');
@@ -828,7 +868,7 @@ export default function InspeccionModule({
                 <option value="" disabled>Seleccionar caja...</option>
                 {cajas.map((c, idx) => (
                   <option key={idx} value={idx}>
-                    Caja {idx + 1} - {c.calibre || 'Sin Calibre'} ({c.frutos} fr. - {c.brix ? `${c.brix}°Bx` : 'Sin Bx'})
+                    Caja {idx + 1} - {c.calibre || 'Sin Calibre'} ({c.frutos} fr. - {c.tempPulpa == null || c.tempPulpa === '' ? 'Sin Temp pulpa' : `${String(c.tempPulpa).replace('.', ',')}°C`} - {c.brix ? `${c.brix}°Bx` : 'Sin Bx'})
                   </option>
                 ))}
               </select>
@@ -849,7 +889,7 @@ export default function InspeccionModule({
               <span className="bg-[#ecfdf5] text-[#059669] px-2 py-1 md:px-3 rounded-lg border border-[#a7f3d0]">Exp: {rend.exp}%</span>
             </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 md:gap-4">
             <div className="flex items-center justify-between">
               <span className="text-[13px] font-medium text-[#475569]">Muestra (frutos):</span>
               <input
@@ -869,6 +909,18 @@ export default function InspeccionModule({
                 <option value="L">L</option><option value="XL">XL</option><option value="J">J</option>
                 <option value="2J">2J</option><option value="3J">3J</option><option value="4J">4J</option><option value="5J">5J</option>
               </select>
+            </div>
+            <div className="flex items-center justify-between">
+              <label htmlFor="temp-pulpa-caja" className="text-[13px] font-medium text-[#475569]">Temp pulpa:</label>
+              <div className="relative">
+                <input id="temp-pulpa-caja" type="text" inputMode="decimal" maxLength={8}
+                  placeholder="0,0" value={cajaActual.tempPulpa ?? ''}
+                  onChange={(e) => manejarCambioTempPulpa(e)}
+                  aria-label="Temperatura de pulpa en grados Celsius por caja"
+                  className="w-28 h-9 rounded-lg border border-[#e2e8f0] bg-white px-2 pr-8 text-center text-sm font-semibold text-[#0f172a] outline-none transition-all focus:border-[#ea580c] focus:ring-2 focus:ring-[#ffedd5]"
+                />
+                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-slate-400 pointer-events-none">°C</span>
+              </div>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[13px] font-medium text-[#475569]">Color embalaje:</span>
@@ -918,7 +970,7 @@ export default function InspeccionModule({
           )}
           {parametrosListos && !headerCompleto && (
             <p className="text-center text-[12px] md:text-sm text-[#ea580c] font-medium my-4 py-2 bg-[#ffedd5] rounded-lg">
-              Completa Muestra, Calibre, Color y °Brix en la sección superior para ingresar los defectos.
+              Completa Muestra, Calibre, Temp pulpa (°C), Color y °Brix para ingresar los defectos.
             </p>
           )}
           {parametrosListos && tabDefectos === 'calidad' && (
@@ -1008,11 +1060,17 @@ export default function InspeccionModule({
               <h3 className="font-black text-[#0f172a] text-base md:text-xl tracking-tight">Corrigiendo Caja {Number(cajaIndexEdicion) + 1}</h3>
               <button onClick={() => setCajaEnEdicion(null)} className="p-1.5 rounded-lg bg-[#f1f5f9] hover:bg-[#e2e8f0] text-[#64748b] hover:text-[#0f172a] transition-colors"><X className="w-5 h-5" /></button>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 border-b border-[#f1f5f9]">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 p-4 border-b border-[#f1f5f9]">
               <div><label className="text-xs font-semibold text-[#475569] block mb-1">Muestra (frutos)</label><input type="number" value={cajaEnEdicion.frutos ?? ''} onChange={(e) => handleEdicionCampo('frutos', e.target.value)} className="w-full h-9 text-center font-semibold text-sm bg-white border border-[#cbd5e1] rounded-lg outline-none focus:border-[#ea580c] transition-colors" /></div>
               <div>
                 <label className="text-xs font-semibold text-[#475569] block mb-1">Calibre</label>
                 <select value={cajaEnEdicion.calibre ?? ''} onChange={(e) => handleEdicionCampo('calibre', e.target.value)} className="w-full h-9 text-center font-semibold text-sm bg-white border border-[#cbd5e1] rounded-lg outline-none focus:border-[#ea580c] transition-colors"><option value="">Seleccionar</option><option value="L">L</option><option value="XL">XL</option><option value="J">J</option><option value="2J">2J</option><option value="3J">3J</option><option value="4J">4J</option><option value="5J">5J</option></select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-[#475569] block mb-1">Temp pulpa (°C)</label>
+                <input type="text" inputMode="decimal" maxLength={8} placeholder="Ej. 2,5"
+                  value={cajaEnEdicion.tempPulpa ?? ''} onChange={(e) => manejarCambioTempPulpa(e, true)}
+                  className="w-full h-9 rounded-lg border border-[#cbd5e1] bg-white px-2 text-center text-sm font-semibold outline-none focus:border-[#ea580c]" />
               </div>
               <div>
                 <label className="text-xs font-semibold text-[#475569] block mb-1">Color</label>

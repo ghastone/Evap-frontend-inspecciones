@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { API_URL } from './config/api.js';
 import Login from './modules/dashboardLive/Login';
 import DashboardLiveView from './modules/dashboardLive/DashboardLiveView';
@@ -47,6 +47,7 @@ export default function App() {
   const [currentView, setCurrentView] = useState(() => {
     return localStorage.getItem('qc_current_view') || 'home';
   });
+  const ocultarSidebarEnMovil = currentView === 'digitacion-temperatura';
   useEffect(()=>{
     if(!user)return;
     const noPermitida=(currentView==='nuevo-proceso'&&!puedeCrearProceso)||(currentView==='historial'&&!puedeVerHistorial)||(currentView.startsWith('dashboard_')&&!puedeVerDashboard)||(currentView==='digitacion-temperatura'&&!puedeDigitacion)||(currentView.startsWith('ajustes-')&&!puedeGestionarAjustes);
@@ -129,9 +130,12 @@ export default function App() {
   const [mostrarAlertaSalida, setMostrarAlertaSalida] = useState(false);
   const [mostrarConfirmacionLogout, setMostrarConfirmacionLogout] = useState(false);
   const vistasProtegidas = ['nuevo-proceso', 'inspeccion'];
-  const intentarNavegar = (nuevaVista) => {
-    if (nuevaVista === currentView) return;
+  const guardSalidaTemperatura = useRef(null);
+  const registrarGuardTemperatura = useCallback(guard => { guardSalidaTemperatura.current = guard; }, []);
+  const continuarNavegacion = (nuevaVista) => {
+    // Cierra el menú incluso si vuelven a pulsar el módulo actual.
     setShowDrawer(false);
+    if (nuevaVista === currentView) return;
     if (['historial', 'ajustes-exportadoras', 'ajustes-variedades', 'ajustes-huertos', 'ajustes-parametros', 'ajustes-usuarios'].includes(nuevaVista)) {
       setIsCollapsed(true);
     } else if (nuevaVista === 'nuevo-proceso' || nuevaVista === 'home') {
@@ -143,6 +147,15 @@ export default function App() {
     } else {
       setCurrentView(nuevaVista);
     }
+  };
+  const intentarNavegar = (nuevaVista) => {
+    setShowDrawer(false);
+    if (nuevaVista === currentView) return;
+    // Bloquea cambios de ventana mientras exista una medición pendiente en temperatura.
+    if (currentView === 'digitacion-temperatura' && guardSalidaTemperatura.current) {
+      if (!guardSalidaTemperatura.current(() => continuarNavegacion(nuevaVista))) return;
+    }
+    continuarNavegacion(nuevaVista);
   };
   const confirmarSalida = () => {
     setCurrentView(vistaPendiente);
@@ -205,7 +218,13 @@ export default function App() {
     localStorage.setItem('qc_user_session', JSON.stringify(userData));
     setCurrentView('home');
   };
-  const handleLogout = () => setMostrarConfirmacionLogout(true);
+  const handleLogout = () => {
+    setShowDrawer(false);
+    if (currentView === 'digitacion-temperatura' && guardSalidaTemperatura.current) {
+      if (!guardSalidaTemperatura.current(() => setMostrarConfirmacionLogout(true))) return;
+    }
+    setMostrarConfirmacionLogout(true);
+  };
   const confirmarLogout = () => {
     setMostrarConfirmacionLogout(false); localStorage.clear(); sessionStorage.clear();
     fetch(`${API_URL}/api/live`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).catch(err=>console.log('Live limpiado (Logout)',err));
@@ -412,14 +431,14 @@ export default function App() {
                 {puedeDigitacion && (
                   <>
                     <div className="pt-4 mt-2 mb-2 border-t border-[#F1F5F9]">
-                      <p className="px-4 text-[11px] font-bold text-[#94A3B8] uppercase tracking-wider">Digitación</p>
+                      <p className="px-4 text-[11px] font-bold text-[#94A3B8] uppercase tracking-wider">Control temperatura</p>
                     </div>
                     <button
                       onClick={() => intentarNavegar('digitacion-temperatura')}
                       className={`group w-full flex items-center px-3.5 py-2.5 rounded-[10px] transition-all duration-150 ${currentView === 'digitacion-temperatura' ? 'bg-[#FFF7ED] border border-[#FFEDD5] text-[#9A3412]' : 'text-[#1E293B] hover:bg-[#F8FAFC] hover:text-[#0F172A] hover:translate-x-[3px]'}`}
                     >
                       <Thermometer className="w-5 h-5 text-[#EA580C] shrink-0 group-hover:scale-[1.06] transition-transform duration-150" />
-                      <span className="text-[14px] font-semibold truncate ml-3">Temperatura en línea</span>
+                      <span className="text-[14px] font-semibold truncate ml-3">Control Temperatura</span>
                     </button>
                   </>
                 )}
@@ -500,7 +519,11 @@ export default function App() {
           box-shadow: none;
         }
       `}</style>
-      <aside className={`${isCollapsed ? 'w-20' : 'w-[260px]'} bg-[#FFFFFF] border-r border-[#F1F5F9] flex flex-col shadow-[0_1px_3px_rgba(0,0,0,0.02)] z-20 shrink-0 transition-all duration-300 relative`}>
+      {showDrawer && ocultarSidebarEnMovil && (
+        <button type="button" aria-label="Cerrar menú lateral" onClick={() => setShowDrawer(false)} className="fixed inset-0 z-[190] bg-slate-900/40 backdrop-blur-[1px] md:hidden" />
+      )}
+      {/* Se reutiliza el sidebar habitual de EVAP: en móvil se muestra como overlay compacto. */}
+      <aside className={`${ocultarSidebarEnMovil ? (showDrawer ? 'flex fixed inset-y-0 left-0 md:relative' : 'hidden md:flex') : 'flex'} ${isCollapsed ? 'w-20' : 'w-[260px]'} bg-[#FFFFFF] border-r border-[#F1F5F9] flex-col shadow-[0_1px_3px_rgba(0,0,0,0.02)] ${ocultarSidebarEnMovil && showDrawer ? 'z-[200] md:z-20' : 'z-20'} shrink-0 transition-all duration-300 ${ocultarSidebarEnMovil && showDrawer ? '' : 'relative'}`}>
         <button onClick={() => setIsCollapsed(!isCollapsed)} className="absolute -right-3 top-7 bg-white border border-[#E2E8F0] text-[#475569] rounded-full p-1 shadow-md hover:bg-[#F8FAFC] transition-colors z-30">
           {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
         </button>
@@ -566,15 +589,15 @@ export default function App() {
           {puedeDigitacion && (
             <>
               <div className="pt-4 mt-2 mb-2 border-t border-[#F1F5F9]">
-                {!isCollapsed && <p className="px-4 text-[11px] font-bold text-[#94A3B8] uppercase tracking-wider">Digitación</p>}
+                {!isCollapsed && <p className="px-4 text-[11px] font-bold text-[#94A3B8] uppercase tracking-wider">Control temperatura</p>}
               </div>
               <button
                 onClick={() => intentarNavegar('digitacion-temperatura')}
-                title={isCollapsed ? 'Temperatura en línea' : undefined}
+                title={isCollapsed ? 'Control Temperatura' : undefined}
                 className={`group w-full flex items-center ${isCollapsed ? 'justify-center px-0 py-2.5' : 'px-3.5 py-2.5'} rounded-[10px] transition-all duration-200 ${currentView === 'digitacion-temperatura' ? 'bg-[#FFF7ED] border border-[#FFEDD5] text-[#9A3412]' : 'text-[#1E293B] hover:bg-[#F8FAFC] hover:text-[#0F172A] hover:translate-x-[3px]'}`}
               >
                 <Thermometer className="w-5 h-5 text-[#EA580C] shrink-0 group-hover:scale-[1.06] transition-transform duration-200" />
-                {!isCollapsed && <span className="text-[14px] font-semibold truncate ml-3">Temperatura en línea</span>}
+                {!isCollapsed && <span className="text-[14px] font-semibold truncate ml-3">Control Temperatura</span>}
               </button>
             </>
           )}
@@ -645,7 +668,12 @@ export default function App() {
           <HistorialProcesosView onVerResumen={(proceso)=>console.log('Resumen:',proceso)} userRole={user.role} usuarioId={user.id} usuarioNombre={user.username} puedeEditar={puedeEditarInformes} puedeEliminar={puedeEliminarProcesos}/>
         )}
         {currentView === 'digitacion-temperatura' && puedeDigitacion && (
-          <TemperaturaLineaModule usuarioId={user.id} />
+          <TemperaturaLineaModule
+            usuarioId={user.id}
+            plantaId={user.planta_id ?? user.plantaId ?? null}
+            onAbrirMenu={() => { setIsCollapsed(true); setShowDrawer(true); }}
+            onRegistrarGuardSalida={registrarGuardTemperatura}
+          />
         )}
         {currentView === 'ajustes-exportadoras' && puedeGestionarAjustes && <div className="p-6 md:p-8 overflow-y-auto h-full animate-fade-in"><GestionExportadoras exportadoras={dbData.exportadoras} setExportadoras={(nuevas) => setDbData(prev => ({ ...prev, exportadoras: nuevas }))} /></div>}
         {currentView === 'ajustes-variedades' && puedeGestionarAjustes && <div className="p-6 md:p-8 overflow-y-auto h-full animate-fade-in"><GestionVariedades variedades={dbData.variedades} setVariedades={(nuevas) => setDbData(prev => ({ ...prev, variedades: nuevas }))} /></div>}
