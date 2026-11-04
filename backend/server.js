@@ -76,6 +76,7 @@ const pool = new Pool({
 // No se requiere otro módulo JS ni un cambio del esquema PostgreSQL.
 const SESION_TEMPERATURAS_MS = 12 * 60 * 60 * 1000;
 const COOKIE_SESION_TEMPERATURAS = 'evap_temp_sesion';
+const COOKIE_SESION_FOTOS = 'evap_fotos_sesion';
 const MAX_SESIONES_TEMPERATURAS = 5000;
 const sesionesEliminarTemperaturas = new Map();
 function hashTokenTemperaturas(token) {
@@ -110,6 +111,15 @@ function enviarCookieTemperaturas(req, res, token) {
     secure: req.secure || protoReverso === 'https',
     maxAge: SESION_TEMPERATURAS_MS,
     path: '/api/digitacion/temperaturas'
+  });
+  // Sesión HTTP-only para editar fotografías de informes ya cerrados.
+  // Se emite en el login; la ruta y el permiso se verifican en el servidor.
+  res.cookie(COOKIE_SESION_FOTOS, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: req.secure || protoReverso === 'https',
+    maxAge: SESION_TEMPERATURAS_MS,
+    path: '/api/procesos'
   });
 }
 function obtenerTokenCookieTemperaturas(req) {
@@ -172,6 +182,59 @@ async function autorizarEliminarTemperaturas(req, res, next) {
   } catch (error) {
     console.error('[EVAP] Error validando permiso DELETE temperaturas:', error);
     res.status(500).json({ error: 'No fue posible validar los permisos de eliminación.' });
+  }
+}
+
+// La cuenta debe tener permiso real de edición de informes, no basta con
+// enviar un usuarioId arbitrario en el cuerpo de la petición.
+function puedeEditarFotosInforme(usuario) {
+  if (usuario.role === 'admin') return true;
+  const permisos = usuario.permisos && typeof usuario.permisos === 'object' &&
+    !Array.isArray(usuario.permisos) ? usuario.permisos : {};
+  if (Object.prototype.hasOwnProperty.call(permisos, 'editar_informes')) {
+    return permisos.editar_informes === true;
+  }
+  return usuario.role === 'qc' || usuario.role === 'qc_avanzado';
+}
+function obtenerTokenCookieFotos(req) {
+  const cookie = String(req.get('cookie') || '');
+  for (const pieza of cookie.split(';')) {
+    const [nombre, ...valor] = pieza.trim().split('=');
+    if (nombre === COOKIE_SESION_FOTOS) return valor.join('=');
+  }
+  return '';
+}
+async function autorizarEditarFotosInforme(req, res, next) {
+  try {
+    const authorization = String(req.get('authorization') || '');
+    const bearer = /^Bearer\s+([A-Za-z0-9_-]{43})$/.exec(authorization);
+    if (authorization && !bearer) return res.status(401).json({ error: 'Token de edición inválido.' });
+    // Las cookies exigen un origen reconocido para evitar CSRF. Un token
+    // Bearer explícito también funciona cuando API_URL usa otro subdominio.
+    if (!bearer && !origenCookieTemperaturasPermitido(req)) {
+      return res.status(403).json({ error: 'Origen no autorizado para modificar fotografías.' });
+    }
+    const token = bearer?.[1] || obtenerTokenCookieFotos(req);
+    if (!/^[A-Za-z0-9_-]{43}$/.test(token)) {
+      return res.status(401).json({ error: 'Tu sesión de edición de fotografías no está activa. Vuelve a iniciar sesión.' });
+    }
+    const hash = hashTokenTemperaturas(token);
+    const sesion = sesionesEliminarTemperaturas.get(hash);
+    if (!sesion || sesion.plantaId !== PLANTA_ID || Date.now() >= sesion.caduca) {
+      sesionesEliminarTemperaturas.delete(hash);
+      return res.status(401).json({ error: 'La sesión caducó. Vuelve a iniciar sesión en EVAP.' });
+    }
+    const result = await pool.query('SELECT id, role, permisos FROM usuarios WHERE id=$1', [sesion.usuarioId]);
+    const usuario = result.rows[0];
+    if (!usuario) return res.status(401).json({ error: 'La cuenta ya no está disponible.' });
+    if (!puedeEditarFotosInforme(usuario)) {
+      return res.status(403).json({ error: 'No tienes permiso para editar las fotografías de informes.' });
+    }
+    req.usuarioEdicionFotos = { id: Number(usuario.id), plantaId: PLANTA_ID };
+    next();
+  } catch (error) {
+    console.error('[EVAP] Error validando edición de fotos:', error);
+    res.status(500).json({ error: 'No fue posible validar el permiso de edición.' });
   }
 }
 
@@ -1629,6 +1692,43 @@ app.post('/api/procesos/colaborativo/:id/fotografias', async (req, res) => {
     res.json({ success: true, fotoLight: Boolean(result.rows[0].fotoLight), fotoDark: Boolean(result.rows[0].fotoDark) });
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
+// Edición posterior al cierre: independiente del estado de las cajas y de la
+// calificación. Solo usuarios con permiso editar_informes (o admin).
+app.patch('/api/procesos/:id/fotografias', autorizarEditarFotosInforme, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const tipo = String(req.body?.tipo || '').toLowerCase();
+    const imagen = req.body?.imagen;
+    if (!Number.isSafeInteger(id) || id < 1) {
+      return res.status(400).json({ error: 'Identificador de proceso no válido.' });
+    }
+    if (tipo !== 'light' && tipo !== 'dark') {
+      return res.status(400).json({ error: 'Selecciona Light o Dark.' });
+    }
+    // Las imágenes enviadas por el nuevo frontend son JPEG comprimidos por
+    // debajo de 520 KiB en base64, para no sobrepasar el proxy móvil.
+    if (typeof imagen !== 'string' || imagen.length > 750 * 1024 ||
+        !/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(imagen)) {
+      return res.status(413).json({ error: 'Fotografía inválida o demasiado grande. Debe ser JPEG comprimido.' });
+    }
+    const columna = tipo === 'light' ? 'foto_light' : 'foto_dark';
+    const resultado = await pool.query(`UPDATE procesos SET ${columna}=$1
+      WHERE id=$2 AND estado <> 'En curso'
+      RETURNING (foto_light IS NOT NULL) AS "fotoLight", (foto_dark IS NOT NULL) AS "fotoDark"`, [imagen, id]);
+    if (!resultado.rows.length) {
+      const existe = await pool.query('SELECT estado FROM procesos WHERE id=$1', [id]);
+      if (!existe.rows.length) return res.status(404).json({ error: 'Proceso no encontrado.' });
+      return res.status(409).json({ error: 'No puedes editar fotografías de un proceso aún en curso.' });
+    }
+    console.info(`[EVAP] Planta ${PLANTA_ID}: usuario ${req.usuarioEdicionFotos.id} actualizó foto ${tipo} de proceso ${id}`);
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, fotoLight: Boolean(resultado.rows[0].fotoLight), fotoDark: Boolean(resultado.rows[0].fotoDark) });
+  } catch (error) {
+    console.error('[EVAP] Error actualizando foto histórica:', error);
+    res.status(500).json({ error: 'No se pudo actualizar la fotografía.' });
+  }
+});
+
 app.post('/api/procesos/colaborativo/abandonar', (req, res) => {
   const procesoId = Number(req.body?.procesoId);
   const clientId = req.body?.clientId ? String(req.body.clientId) : '';

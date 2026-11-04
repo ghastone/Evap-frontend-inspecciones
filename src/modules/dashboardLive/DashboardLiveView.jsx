@@ -50,7 +50,7 @@ function BarraTolerancia({ nombre, pct, lim1, lim2 }) {
   return (
     <div className="grid grid-cols-12 gap-2 h-[38px] shrink-0">
       <div className="col-span-5 h-full flex items-center pr-2" title={nombre}>
-        <span className="text-[12px] lg:text-[13px] truncate leading-tight w-full font-medium text-[#475569]">
+        <span className="text-[12px] lg:text-[15px] truncate leading-tight w-full font-medium text-[#000000]">
           {nombre}
         </span>
       </div>
@@ -94,53 +94,85 @@ function ListaDefectosInfinita({ items = [] }) {
   const viewportRef = useRef(null);
   const contentRef = useRef(null);
   const debeDesplazar = items.length > 5;
+
   useEffect(() => {
     const viewport = viewportRef.current;
     const content = contentRef.current;
-    if (!viewport || !content || !debeDesplazar) {
-      if (viewport) viewport.scrollTop = 0;
+
+    if (!viewport || !content) return;
+
+    if (!debeDesplazar) {
+      viewport.scrollTop = 0;
       return;
     }
-    let scrollAmount = 0;
+
+    // Conservar la posición cuando llegan datos nuevos desde el backend.
+    let scrollAmount = viewport.scrollTop;
     let paused = false;
     let animationFrameId;
+
     const step = () => {
       if (!paused && !document.hidden && viewport.isConnected && content.isConnected) {
         const targetHeight = content.offsetHeight;
-        if (Math.abs(viewport.scrollTop - scrollAmount) > 2) scrollAmount = viewport.scrollTop;
+
+        if (Math.abs(viewport.scrollTop - scrollAmount) > 2) {
+          scrollAmount = viewport.scrollTop;
+        }
+
         scrollAmount += 0.45;
-        if (targetHeight > 0 && scrollAmount >= targetHeight) scrollAmount -= targetHeight;
+
+        if (targetHeight > 0 && scrollAmount >= targetHeight) {
+          scrollAmount -= targetHeight;
+        }
+
         viewport.scrollTop = scrollAmount;
       }
+
       animationFrameId = requestAnimationFrame(step);
     };
+
     const pause = () => { paused = true; };
     const play = () => { paused = false; };
+
     viewport.addEventListener('mouseenter', pause);
     viewport.addEventListener('mouseleave', play);
     viewport.addEventListener('touchstart', pause, { passive: true });
     viewport.addEventListener('touchend', play);
+    viewport.addEventListener('touchcancel', play);
+
     animationFrameId = requestAnimationFrame(step);
+
     return () => {
       cancelAnimationFrame(animationFrameId);
       viewport.removeEventListener('mouseenter', pause);
       viewport.removeEventListener('mouseleave', play);
       viewport.removeEventListener('touchstart', pause);
       viewport.removeEventListener('touchend', play);
+      viewport.removeEventListener('touchcancel', play);
     };
-  }, [items, debeDesplazar]);
+  }, [debeDesplazar, items.length]);
+
   const renderItems = (suffix = '') => (
     <div
       ref={suffix ? undefined : contentRef}
       className={debeDesplazar
-        ? "flex flex-col gap-[4px] xl:gap-[10px] pb-[4px] xl:pb-[10px] w-full shrink-0"
-        : "h-full flex flex-col justify-start gap-[4px] xl:gap-[10px] w-full"}
+        ? 'flex flex-col gap-[4px] xl:gap-[10px] pb-[4px] xl:pb-[10px] w-full shrink-0'
+        : 'h-full flex flex-col justify-start gap-[4px] xl:gap-[10px] w-full'}
     >
-      {items.map((item, index) => <BarraTolerancia key={`${item.nombre}-${index}-${suffix}`} {...item} />)}
+      {items.map((item, index) => (
+        <BarraTolerancia key={`${item.nombre}-${index}-${suffix}`} {...item} />
+      ))}
     </div>
   );
+
   return (
-    <div ref={viewportRef} className="h-full min-h-0 overflow-hidden w-full" style={{ scrollBehavior: 'auto' }}>
+    <div
+      ref={viewportRef}
+      className={`w-full min-h-0 overflow-hidden ${
+        debeDesplazar ? 'h-[210px] lg:h-full' : 'h-auto lg:h-full'
+      }`}
+      style={{ scrollBehavior: 'auto' }}
+    >
       {renderItems()}
       {debeDesplazar && renderItems('clone')}
     </div>
@@ -370,7 +402,7 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
   };
   if (!hayConexion) {
     return (
-      <div className={`dashboard-live-root ${isFullScreen ? "fixed inset-0 z-[100] h-screen" : "h-full relative"} w-full bg-[#f8fafc] flex flex-col items-center justify-center`} style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
+      <div className={`dashboard-live-root ${isFullScreen ? "fixed inset-0 z-[100] h-[100dvh] md:h-screen" : "h-full relative"} w-full bg-[#f8fafc] flex flex-col items-center justify-center`} style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
         <style>{`
           @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
           .dashboard-live-root, .dashboard-live-root * { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important; }
@@ -413,7 +445,7 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
   const bannerStartColor = isObjetado ? "#991B1B" : "#047857";
   const bannerEndColor = isObjetado ? "#DC2626" : "#10b981";
   return (
-    <div className={`dashboard-live-root ${isFullScreen ? "fixed inset-0 z-[100] h-screen" : "h-full relative"} w-full bg-[#f8fafc] overflow-x-hidden overflow-y-auto md:overflow-y-hidden`} style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
+    <div className={`dashboard-live-root ${isFullScreen ? "fixed inset-0 z-[100] h-[100dvh] md:h-screen" : "h-full relative"} w-full bg-[#f8fafc] overflow-x-hidden overflow-y-auto md:overflow-y-hidden`} style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
         .dashboard-live-root, .dashboard-live-root * { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important; }
@@ -435,7 +467,7 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
           .dashboard-live-root .live-card { max-width: 100%; }
         }
       `}</style>
-      <div className={`w-full min-h-full md:h-full flex flex-col py-3 sm:py-4 px-2 sm:px-4 lg:px-6 xl:px-8 min-h-0 ${isObjetado ? 'gap-[8px] xl:gap-[11px]' : 'gap-[11px] xl:gap-[14px]'}`}>
+      <div className={`w-full min-h-full md:h-full flex flex-col py-3 sm:py-4 px-2 sm:px-4 lg:px-6 xl:px-8 pb-[calc(24px+env(safe-area-inset-bottom))] sm:pb-4 ${isObjetado ? 'gap-[8px] xl:gap-[11px]' : 'gap-[11px] xl:gap-[14px]'}`}>
         {errorParametros && !datos.numProceso?.startsWith('...') && (
           <div className="bg-amber-50 border border-amber-200 text-amber-700 rounded-xl px-4 py-2 text-xs font-bold shrink-0">
             No fue posible actualizar el catálogo de parámetros. Se utilizará el snapshot guardado del proceso si está disponible.
@@ -492,39 +524,39 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
         </div>
         {/* ALERTA DE RECHAZO */}
         {isObjetado && (
-          <div className="flex bg-white border border-[#e11d48] rounded-xl overflow-hidden shrink-0 shadow-sm h-[34px] xl:h-[40px] w-full animate-fade-in-up delay-1">
-            <div className="bg-[#e11d48] w-[60px] xl:w-[70px] flex items-center justify-center shrink-0">
+          <div className="flex bg-white border border-[#e11d48] rounded-xl overflow-hidden shrink-0 shadow-sm h-auto min-h-[44px] lg:h-[34px] xl:h-[40px] w-full animate-fade-in-up delay-1">
+            <div className="bg-[#e11d48] w-[44px] sm:w-[60px] xl:w-[70px] flex items-center justify-center shrink-0">
               <AlertTriangle className="w-4 h-4 xl:w-5 xl:h-5 text-white" strokeWidth={2.5} />
             </div>
-            <div className="flex items-center px-4 md:px-6 flex-1 bg-[#fff1f2]">
-              <div className="w-[3px] h-[20px] bg-[#fecaca] mr-4 rounded-full"></div>
-              <span className="text-[#e11d48] text-[12px] md:text-[13px] xl:text-[14px] font-bold tracking-wide">
+            <div className="flex items-center min-w-0 px-2 py-2 sm:px-4 md:px-6 lg:py-0 flex-1 bg-[#fff1f2]">
+              <div className="hidden sm:block w-[3px] h-[20px] bg-[#fecaca] mr-4 rounded-full shrink-0"></div>
+              <span className="text-[#e11d48] text-[10px] sm:text-[11px] md:text-[13px] xl:text-[14px] leading-[1.3] lg:leading-normal font-bold tracking-normal md:tracking-wide break-words">
                 <strong className="font-black uppercase mr-1">Atención:</strong> EL LOTE ESTÁ SIENDO OBJETADO DEBIDO A {motivoObj}.
               </span>
             </div>
           </div>
         )}
         {/* TARJETAS DE INFORMACIÓN DEL PROCESO */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[8px] lg:gap-[10px] shrink-0 w-full animate-fade-in-up delay-1">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-[8px] lg:gap-[10px] shrink-0 w-full animate-fade-in-up delay-1">
           {[
-            { label: 'N° proceso', val: datos.numProceso },
-            { label: 'Huerto', val: datos.huerto },
-            { label: 'Variedad', val: datos.variedad },
-            { label: 'Cajas inspeccionadas', val: datos.cajasEvaluadas }
+            { label: 'N° proceso', val: datos.numProceso, orden: 'order-1 lg:order-1' },
+            { label: 'Huerto', val: datos.huerto, orden: 'order-3 lg:order-2' },
+            { label: 'Variedad', val: datos.variedad, orden: 'order-4 lg:order-3' },
+            { label: 'Cajas inspeccionadas', labelMovil: 'Cajas insp.', val: datos.cajasEvaluadas, orden: 'order-2 lg:order-4' }
           ].map((item, i) => (
-            <div key={i} className={`live-card bg-white rounded-2xl shadow-sm border border-[#e2e8f0] min-h-[62px] lg:h-[58px] px-4 flex flex-col justify-center transition-colors w-full relative overflow-hidden group`}>
+            <div key={i} className={`live-card ${item.orden} bg-white rounded-2xl shadow-sm border border-[#e2e8f0] min-h-[62px] lg:h-[58px] px-4 flex flex-col justify-center transition-colors w-full relative overflow-hidden group`}>
               <div className={`absolute left-0 top-0 bottom-0 w-1.5 transition-colors ${isObjetado ? 'bg-[#e11d48]' : 'bg-[#ea580c]'}`}></div>
               <div className="pl-2">
-                <p className="text-[11px] lg:text-[12px] font-bold text-[#64748b] mb-0.5 leading-none uppercase tracking-wider">{item.label}</p>
+                <p className="text-[11px] lg:text-[12px] font-bold text-[#64748b] mb-0.5 leading-none uppercase tracking-wider"><span className="lg:hidden">{item.labelMovil || item.label}</span><span className="hidden lg:inline">{item.label}</span></p>
                 <p className="text-[16px] lg:text-[17px] font-black text-[#0f172a] truncate leading-tight">{item.val}</p>
               </div>
             </div>
           ))}
         </div>
         {/* SECCIÓN CENTRAL: DONA, ESTADO, BRIX */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-[8px] xl:gap-[10px] shrink-0 w-full xl:h-[178px] animate-fade-in-up delay-2">
+        <div className="grid grid-cols-1 lg:grid-cols-12 lg:items-stretch gap-[8px] xl:gap-[10px] shrink-0 w-full xl:min-h-[178px] animate-fade-in-up delay-2"> 
           {/* DONA Y PORCENTAJES GLOBALES */}
-          <div className="live-card col-span-12 lg:col-span-5 bg-white rounded-2xl shadow-sm border border-[#e2e8f0] px-5 xl:px-6 py-2 flex flex-col justify-between h-full overflow-hidden">
+          <div className="live-card lg:col-span-5 bg-white rounded-2xl shadow-sm border border-[#e2e8f0] px-5 xl:px-6 py-2 flex flex-col justify-between h-full overflow-hidden">
             <h3 className="text-[13px] xl:text-[14px] font-bold text-[#0f172a] mb-1 tracking-wider uppercase">Resumen general</h3>
             <div className="flex flex-col sm:flex-row items-center gap-3 xl:gap-5 flex-1 justify-center w-full">
               <div className="w-[130px] h-[130px] xl:w-[140px] xl:h-[140px] relative shrink-0">
@@ -567,7 +599,7 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
                         <div className={`w-3 h-3 xl:w-3.5 xl:h-3.5 rounded-full shadow-sm transition-transform duration-200 ${activo ? 'scale-125' : ''}`} style={{ backgroundColor: item.color }}></div>
                         <span className="text-[12px] xl:text-[14px] font-bold text-[#334155]">{item.name}</span>
                       </div>
-                      <span key={`${item.key}-${animacionDatos}`} className="live-value-pop text-[13px] xl:text-[15px] font-black" style={{ color: item.color }}>{item.value.toFixed(1).replace('.', ',')}%</span>
+                      <span key={`${item.key}-${animacionDatos}`} className="live-value-pop text-[13px] xl:text-[17px] font-black" style={{ color: item.color }}>{item.value.toFixed(1).replace('.', ',')}%</span>
                     </div>
                   );
                 })}
@@ -575,29 +607,29 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
             </div>
           </div>
           {/* ESTADO Y CALIFICACIÓN */}
-          <div className="col-span-12 sm:col-span-6 lg:col-span-3 flex flex-col gap-[8px] w-full h-full min-h-0">
-            <div className={`live-card rounded-2xl shadow-sm border px-5 py-2 flex-1 flex flex-col transition-colors ${isObjetado ? 'bg-[#fff1f2] border-[#fecaca]' : 'bg-white border-[#e2e8f0]'}`}>
+          <div className="lg:col-span-3 flex flex-row lg:flex-col gap-[8px] w-full h-full min-h-[100px] lg:min-h-0">
+            <div className={`live-card min-w-0 w-1/2 lg:w-full rounded-2xl shadow-sm border px-3 lg:px-5 py-2 flex-1 flex flex-col transition-colors ${isObjetado ? 'bg-[#fff1f2] border-[#fecaca]' : 'bg-white border-[#e2e8f0]'}`}>
               <div className="flex justify-between items-center w-full mb-1">
-                <h3 className={`text-[12px] xl:text-[13px] font-bold tracking-wider uppercase ${isObjetado ? 'text-[#e11d48]' : 'text-[#64748b]'}`}>Estado</h3>
+                <h3 className="text-[12px] xl:text-[13px] font-bold tracking-wider uppercase text-[#0f172a]">Estado</h3>
                 <span className={`px-2 py-0.5 rounded-md text-[9px] xl:text-[10px] font-black flex items-center gap-1.5 shadow-sm border tracking-wider ${isObjetado ? 'bg-[#fee2e2] text-[#b91c1c] border-[#fca5a5]' : 'bg-[#dcfce7] text-[#047857] border-[#86efac]'}`}>
                   <span className={`w-1.5 h-1.5 rounded-full animate-pulse ${isObjetado ? 'bg-[#ef4444]' : 'bg-[#10b981]'}`}></span> LIVE
                 </span>
               </div>
               <div className="flex-1 flex items-center justify-center">
-                <span key={`estado-${animacionDatos}`} className={`live-value-pop text-[22px] xl:text-[28px] font-black tracking-tight ${isObjetado ? 'text-[#e11d48]' : 'text-[#10b981]'}`}>
+                <span key={`estado-${animacionDatos}`} className={`live-value-pop text-[18px] sm:text-[22px] xl:text-[28px] font-black tracking-tight ${isObjetado ? 'text-[#e11d48]' : 'text-[#10b981]'}`}>
                   {datos.estado}
                 </span>
               </div>
             </div>
-            <div className="live-card bg-white rounded-2xl shadow-sm border border-[#e2e8f0] px-5 py-2 flex-1 flex flex-col w-full">
-              <h3 className="text-[12px] xl:text-[13px] font-bold text-[#64748b] tracking-wider uppercase mb-1">Calificación</h3>
+            <div className="live-card min-w-0 w-1/2 lg:w-full bg-white rounded-2xl shadow-sm border border-[#e2e8f0] px-3 lg:px-5 py-2 flex-1 flex flex-col">
+              <h3 className="text-[12px] xl:text-[13px] font-bold text-[#0f172a] tracking-wider uppercase mb-1">Calificación</h3>
               <div className="flex-1 flex items-center justify-center">
-                <span key={`nota-${animacionDatos}`} className={`live-value-pop text-[28px] xl:text-[36px] font-black ${isObjetado ? 'text-[#e11d48]' : 'text-[#0f172a]'}`}>{datos.calificacion}</span>
+                <span key={`nota-${animacionDatos}`} className={`live-value-pop text-[26px] sm:text-[28px] xl:text-[36px] font-black ${isObjetado ? 'text-[#e11d48]' : 'text-[#0f172a]'}`}>{datos.calificacion}</span>
               </div>
             </div>
           </div>
           {/* SÓLIDOS SOLUBLES */}
-          <div className="live-card col-span-12 sm:col-span-6 lg:col-span-4 bg-white rounded-2xl shadow-sm border border-[#e2e8f0] p-4 xl:p-3 flex flex-col w-full h-full min-h-0 overflow-hidden">
+          <div className="live-card lg:col-span-4 bg-white rounded-2xl shadow-sm border border-[#e2e8f0] p-4 xl:p-3 flex flex-col w-full h-full min-h-0 overflow-hidden">
             <h3 className="text-[13px] xl:text-[14px] font-bold text-[#0f172a] mb-2 xl:mb-1 shrink-0 text-left uppercase tracking-wider">Sólidos solubles</h3>
             <div className="flex-1 grid grid-cols-2 divide-x divide-[#f1f5f9] text-center items-stretch">
               {/* Columna Light */}
@@ -654,8 +686,8 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
           </div>
         </div>
         {/* BARRAS DE DEFECTOS AL INFERIOR */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-[8px] xl:gap-[14px] flex-1 min-h-0 w-full mt-1 animate-fade-in-up delay-3">
-          <div className="live-card bg-white rounded-2xl shadow-sm border border-[#e2e8f0] px-5 lg:px-6 pt-3 pb-3 flex flex-col w-full min-h-0 overflow-hidden">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-[8px] xl:gap-[14px] flex-none lg:flex-1 min-h-0 w-full mt-1 animate-fade-in-up delay-3">
+          <div className="live-card bg-white rounded-2xl shadow-sm border border-[#e2e8f0] px-5 lg:px-6 pt-3 pb-3 flex flex-col w-full min-h-[290px] lg:min-h-0 overflow-hidden">
             <h3 className="text-[13px] font-bold text-[#0f172a] mb-2 shrink-0 uppercase tracking-wider">Principales defectos de calidad</h3>
             <div className="w-full flex-1 min-h-0 flex items-stretch overflow-hidden">
               <ListaDefectosInfinita items={datos.topCalidad} />
@@ -666,7 +698,7 @@ export default function DashboardLiveView({ onClose, onAbrirMenu }) {
               <span className="flex items-center gap-1.5 text-[12px] lg:text-[13px] font-bold text-[#334155]"><div className="w-2.5 h-2.5 rounded-full bg-[#e11d48]"></div> C</span>
             </div>
           </div>
-          <div className="live-card bg-white rounded-2xl shadow-sm border border-[#e2e8f0] px-5 lg:px-6 pt-3 pb-3 flex flex-col w-full min-h-0 overflow-hidden">
+          <div className="live-card bg-white rounded-2xl shadow-sm border border-[#e2e8f0] px-5 lg:px-6 pt-3 pb-3 flex flex-col w-full min-h-[290px] lg:min-h-0 overflow-hidden">
             <h3 className="text-[13px] font-bold text-[#0f172a] mb-2 shrink-0 uppercase tracking-wider">Principales defectos de condición</h3>
             <div className="w-full flex-1 min-h-0 flex items-stretch overflow-hidden">
               <ListaDefectosInfinita items={datos.topCondicion} />

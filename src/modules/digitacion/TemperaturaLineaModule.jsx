@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft, BarChart3, CalendarDays, ChevronRight, Clock3, FilePlus2, History,
-  AlertTriangle, Check, ChevronDown, Download, Eye, Menu, Moon, MoreHorizontal, MoreVertical, PencilLine, Plus, RefreshCw, Save, Search, Sun, Thermometer, Trash2, X, UserRound, ShieldAlert, Settings2
+  AlertTriangle, Check, ChevronDown, Download, Eye, Menu, Moon, MoreHorizontal, MoreVertical, PencilLine, Plus, RefreshCw, Save, Search, Sun, Thermometer, Trash2, X, ShieldAlert
 } from 'lucide-react';
 import { API_URL } from '../../config/api.js';
 
@@ -273,7 +273,7 @@ const fechaExcel = fechaStr => {
   return y && m && d ? `${d}-${m}-${y}` : String(fechaStr);
 };
 
-export default function TemperaturaLineaModule({ onAbrirMenu, onRegistrarGuardSalida, usuarioId, plantaId = null }) {
+export default function TemperaturaLineaModule({ onAbrirMenu, onRegistrarGuardSalida, usuarioId, userRole = '', plantaId = null }) {
   // El backend aún no informa el estado de cierre. Se conserva solo en este navegador.
   // El almacenamiento local se separa por usuario y, cuando está disponible, por planta.
   const sufijoLocal = `${usuarioId ?? 'sin-usuario'}:${plantaId ?? 'sin-planta'}`;
@@ -286,6 +286,7 @@ export default function TemperaturaLineaModule({ onAbrirMenu, onRegistrarGuardSa
   const [mostrarConfirmacionNavegacion, setMostrarConfirmacionNavegacion] = useState(false);
   const [confirmacionFinalizacion, setConfirmacionFinalizacion] = useState(null);
   const [vista, setVista] = useState('menu');
+  const esAdministrador = ['admin', 'administrador'].includes(String(userRole ?? '').trim().toLowerCase());
   const [puntos, setPuntos] = useState(PUNTOS_INICIALES);
   const [fecha, setFecha] = useState(fechaHoy());
   const [turno, setTurno] = useState('Dia');
@@ -1338,7 +1339,7 @@ export default function TemperaturaLineaModule({ onAbrirMenu, onRegistrarGuardSa
     </div>
   );
 
-  const BotonExportarExcel = () => (
+  const BotonExportarExcel = () => esAdministrador ? (
     <button
       type="button"
       onClick={exportarExcel}
@@ -1348,7 +1349,7 @@ export default function TemperaturaLineaModule({ onAbrirMenu, onRegistrarGuardSa
       {exportando ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
       {exportando ? 'Exportando...' : 'Exportar Excel'}
     </button>
-  );
+  ) : null;
 
   const DialogosEliminacion = () => (
     <>
@@ -1540,7 +1541,6 @@ export default function TemperaturaLineaModule({ onAbrirMenu, onRegistrarGuardSa
           <button type="button" onClick={volverMenu} aria-label="Volver al menú" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-600 active:scale-95"><ArrowLeft className="h-[18px] w-[18px]" /></button>
           <h1 className="min-w-0 flex-1 truncate text-[18px] font-bold tracking-tight text-slate-900">{historialTabMovil === 'resumen' ? 'Resumen Diario' : historialTabMovil === 'graficos' ? 'Gráficos' : 'Alertas'}</h1>
           <button type="button" onClick={() => cargarResumenHistorial()} disabled={cargandoResumen} aria-label="Actualizar historial" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slate-500 hover:bg-white active:scale-95 disabled:opacity-50"><RefreshCw className={`h-[17px] w-[17px] ${cargandoResumen ? 'animate-spin' : ''}`} /></button>
-          <button type="button" onClick={() => onAbrirMenu ? onAbrirMenu() : setVista('menu')} aria-label="Abrir menú de EVAP" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#2563EB] text-white shadow-sm active:scale-95"><UserRound className="h-[17px] w-[17px]" /></button>
         </div>
       </header>
       <header className="hidden md:block bg-white border-b border-[#F1F5F9]">
@@ -1558,7 +1558,28 @@ export default function TemperaturaLineaModule({ onAbrirMenu, onRegistrarGuardSa
             <span className="truncate">Última carga: {ultimaActualizacionHistorial && !Number.isNaN(ultimaActualizacionHistorial.getTime()) ? `${ultimaActualizacionHistorial.toLocaleDateString('es-CL', { day: 'numeric', month: 'short', year: 'numeric' })} · ${ultimaActualizacionHistorial.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false })}` : 'Sin datos'}</span>
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500 animate-pulse" />
           </div>
-          <button type="button" onClick={exportarExcel} disabled={exportando} className="flex h-8 shrink-0 items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-2.5 text-[10px] font-bold text-blue-700 active:scale-95 disabled:opacity-50"><Download className="h-3.5 w-3.5" />{exportando ? 'Exportando' : 'Exportar'}</button>
+          {esAdministrador && <button type="button" onClick={exportarExcel} disabled={exportando} className="flex h-8 shrink-0 items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-2.5 text-[10px] font-bold text-blue-700 active:scale-95 disabled:opacity-50"><Download className="h-3.5 w-3.5" />{exportando ? 'Exportando' : 'Exportar'}</button>}
+        </section>
+
+        <section className="md:hidden rounded-2xl border border-slate-200/80 bg-white p-1.5 shadow-sm">
+          <div className="grid grid-cols-3 gap-1">
+            {[
+              { id: 'resumen', nombre: 'Resumen', icono: <CalendarDays className="h-4 w-4" /> },
+              { id: 'graficos', nombre: 'Gráficos', icono: <BarChart3 className="h-4 w-4" /> },
+              { id: 'alertas', nombre: 'Alertas', icono: <ShieldAlert className="h-4 w-4" /> }
+            ].map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setHistorialTabMovil(tab.id)}
+                aria-current={historialTabMovil === tab.id ? 'page' : undefined}
+                className={`flex items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-[11px] font-semibold transition-all active:scale-95 ${historialTabMovil === tab.id ? 'bg-[#EFF6FF] text-[#2563EB] shadow-sm' : 'text-slate-500 hover:bg-slate-50'}`}
+              >
+                {tab.icono}
+                <span>{tab.nombre}</span>
+              </button>
+            ))}
+          </div>
         </section>
 
         <section className="hidden md:flex bg-white border border-slate-200 rounded-xl shadow-sm px-4 py-3 items-center justify-between gap-3">
@@ -1719,16 +1740,6 @@ export default function TemperaturaLineaModule({ onAbrirMenu, onRegistrarGuardSa
           </section>
         )}
       </main>
-      <nav aria-label="Navegación móvil del historial" className="md:hidden fixed inset-x-0 bottom-0 z-30 mx-auto flex w-full max-w-md justify-around border-t border-slate-200/80 bg-white/95 px-2 pt-2 backdrop-blur-md" style={{ paddingBottom: 'max(8px, env(safe-area-inset-bottom))' }}>
-        {[
-          { id: 'resumen', nombre: 'Resumen', icono: <CalendarDays className="h-5 w-5" /> },
-          { id: 'graficos', nombre: 'Gráficos', icono: <BarChart3 className="h-5 w-5" /> },
-          { id: 'alertas', nombre: 'Alertas', icono: <ShieldAlert className="h-5 w-5" /> },
-          { id: 'ajustes', nombre: 'Ajustes', icono: <Settings2 className="h-5 w-5" /> }
-        ].map(tab => (
-          <button key={tab.id} type="button" onClick={() => tab.id === 'ajustes' ? (onAbrirMenu ? onAbrirMenu() : setVista('menu')) : setHistorialTabMovil(tab.id)} aria-current={historialTabMovil === tab.id ? 'page' : undefined} className={`flex min-w-[60px] flex-col items-center justify-center gap-0.5 rounded-xl px-2 py-1 text-[10px] font-semibold active:scale-95 ${historialTabMovil === tab.id ? 'text-[#2563EB]' : 'text-slate-400'}`}>{tab.icono}<span>{tab.nombre}</span></button>
-        ))}
-      </nav>
       {DialogosEliminacion()}
     </div>
   );
@@ -1740,7 +1751,6 @@ export default function TemperaturaLineaModule({ onAbrirMenu, onRegistrarGuardSa
           <button type="button" onClick={() => setVista('historial')} aria-label="Volver al historial" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-600 active:scale-95"><ArrowLeft className="h-[18px] w-[18px]" /></button>
           <div className="min-w-0 flex-1"><h1 className="truncate text-[18px] font-bold tracking-tight text-slate-900">Detalle diario</h1><p className="text-[10px] font-medium text-slate-500">{formatearFechaHistorial(historialFecha)}</p></div>
           <button type="button" onClick={() => cargarHistorial(historialFecha)} disabled={cargandoHistorial} aria-label="Actualizar detalle" className="flex h-9 w-9 items-center justify-center rounded-xl text-slate-500 hover:bg-white disabled:opacity-40"><RefreshCw className={`h-[17px] w-[17px] ${cargandoHistorial ? 'animate-spin' : ''}`} /></button>
-          <button type="button" onClick={() => onAbrirMenu ? onAbrirMenu() : setVista('menu')} aria-label="Abrir menú EVAP" className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2563EB] text-white"><UserRound className="h-[17px] w-[17px]" /></button>
         </div>
       </header>
       <header className="hidden md:block border-b border-slate-100 bg-white">

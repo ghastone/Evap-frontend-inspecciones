@@ -47,7 +47,9 @@ export default function App() {
   const [currentView, setCurrentView] = useState(() => {
     return localStorage.getItem('qc_current_view') || 'home';
   });
-  const ocultarSidebarEnMovil = currentView === 'digitacion-temperatura';
+  // Historial de procesos y Control Temperatura ocupan todo el ancho móvil.
+  // El sidebar original solo se muestra al pulsar el botón miniatura del módulo.
+  const ocultarSidebarEnMovil = ['digitacion-temperatura', 'historial'].includes(currentView);
   useEffect(()=>{
     if(!user)return;
     const noPermitida=(currentView==='nuevo-proceso'&&!puedeCrearProceso)||(currentView==='historial'&&!puedeVerHistorial)||(currentView.startsWith('dashboard_')&&!puedeVerDashboard)||(currentView==='digitacion-temperatura'&&!puedeDigitacion)||(currentView.startsWith('ajustes-')&&!puedeGestionarAjustes);
@@ -70,61 +72,6 @@ export default function App() {
   const [showAjustes, setShowAjustes] = useState(false);
   const [dashboardsAbierto, setDashboardsAbierto] = useState(true);
   const [showDrawer, setShowDrawer] = useState(false);
-  // ================= ESTADOS INACTIVIDAD =================
-  const [mostrarAlertaInactividad, setMostrarAlertaInactividad] = useState(false);
-  const timerInactividad = useRef(null);
-  const timerCierre = useRef(null);
-  const TIEMPO_ALERTA = 28 * 60 * 1000;
-  const TIEMPO_CIERRE_FINAL = 2 * 60 * 1000;
-  const resetearTemporizadores = () => {
-    if (timerInactividad.current) clearTimeout(timerInactividad.current);
-    if (timerCierre.current) clearTimeout(timerCierre.current);
-    if (user) {
-      timerInactividad.current = setTimeout(() => {
-        setMostrarAlertaInactividad(true);
-        timerCierre.current = setTimeout(() => {
-          forzarCierrePorInactividad();
-        }, TIEMPO_CIERRE_FINAL);
-      }, TIEMPO_ALERTA);
-    }
-  };
-  const forzarCierrePorInactividad = () => {
-    localStorage.clear();
-    sessionStorage.clear();
-    fetch(`${API_URL}/api/live`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
-    }).catch(err => console.log('Live limpiado (Inactividad)', err));
-    setUser(null);
-    setMostrarAlertaInactividad(false);
-    setCurrentView('home');
-    setDatosProcesoActivo(null);
-    alert("Tu sesión se ha cerrado por inactividad prolongada por tu seguridad.");
-  };
-  const mantenerSesionViva = () => {
-    setMostrarAlertaInactividad(false);
-    resetearTemporizadores();
-  };
-  useEffect(() => {
-    if (!user) return;
-    let ultimoMovimiento = Date.now();
-    const handleActividad = () => {
-      const ahora = Date.now();
-      if (ahora - ultimoMovimiento > 2000 && !mostrarAlertaInactividad) {
-        ultimoMovimiento = ahora;
-        resetearTemporizadores();
-      }
-    };
-    const eventos = ['mousemove', 'keydown', 'click', 'touchstart', 'scroll'];
-    eventos.forEach(evt => window.addEventListener(evt, handleActividad));
-    resetearTemporizadores();
-    return () => {
-      eventos.forEach(evt => window.removeEventListener(evt, handleActividad));
-      if (timerInactividad.current) clearTimeout(timerInactividad.current);
-      if (timerCierre.current) clearTimeout(timerCierre.current);
-    };
-  }, [user, mostrarAlertaInactividad]);
   // ================= ESTADOS INTERCEPTOR DE NAVEGACIÓN =================
   const [vistaPendiente, setVistaPendiente] = useState(null);
   const [mostrarAlertaSalida, setMostrarAlertaSalida] = useState(false);
@@ -267,28 +214,6 @@ export default function App() {
           </button>
           <button onClick={confirmarSalida} className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl text-xs transition-colors shadow-sm">
             Sí, salir y descartar
-          </button>
-        </div>
-      </div>
-    </div>
-  ) : null;
-  const ModalInactividad = mostrarAlertaInactividad ? (
-    <div className="fixed inset-0 z-[1000] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
-      <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl text-center">
-        <div className="p-8">
-          <div className="w-20 h-20 bg-orange-100 text-orange-500 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce">
-            <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <h3 className="text-2xl font-black text-slate-900 mb-3">¿Sigues ahí?</h3>
-          <p className="text-sm text-slate-500 leading-relaxed px-4">
-            Por tu seguridad, cerraremos tu sesión por inactividad en <span className="font-bold text-slate-800">pocos minutos</span>. ¿Deseas mantener tu sesión abierta?
-          </p>
-        </div>
-        <div className="bg-slate-50 px-6 py-5 flex gap-3 justify-center border-t border-slate-100">
-          <button onClick={mantenerSesionViva} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl w-full transition-colors shadow-md text-sm">
-            Sí, seguir trabajando
           </button>
         </div>
       </div>
@@ -489,7 +414,6 @@ export default function App() {
         )}
         {ModalLogout}
         {ModalAdvertencia}
-        {ModalInactividad}
       </div>
     );
   }
@@ -653,7 +577,7 @@ export default function App() {
           </button>
         </div>
       </aside>
-      <main className="flex-1 h-full overflow-hidden">
+      <main className="flex-1 min-w-0 h-full overflow-hidden">
         {currentView === 'home' && (
           <div className="w-full h-full p-4 md:p-8 flex items-center justify-center animate-fade-in">
             <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm w-full h-full flex flex-col items-center justify-center p-8 text-center">
@@ -665,13 +589,26 @@ export default function App() {
         )}
         {/* === RENDERIZADO DE MÓDULOS SEGÚN VISTA === */}
         {currentView === 'historial' && puedeVerHistorial && (
-          <HistorialProcesosView onVerResumen={(proceso)=>console.log('Resumen:',proceso)} userRole={user.role} usuarioId={user.id} usuarioNombre={user.username} puedeEditar={puedeEditarInformes} puedeEliminar={puedeEliminarProcesos}/>
+          <HistorialProcesosView
+            onVerResumen={(proceso) => console.log('Resumen:', proceso)}
+            onAbrirMenu={() => {
+              // Abrir la barra lateral original de EVAP en tamaño completo.
+              setIsCollapsed(false);
+              setShowDrawer(true);
+            }}
+            userRole={user.role}
+            usuarioId={user.id}
+            usuarioNombre={user.username}
+            puedeEditar={puedeEditarInformes}
+            puedeEliminar={puedeEliminarProcesos}
+          />
         )}
         {currentView === 'digitacion-temperatura' && puedeDigitacion && (
           <TemperaturaLineaModule
             usuarioId={user.id}
+            userRole={user.role}
             plantaId={user.planta_id ?? user.plantaId ?? null}
-            onAbrirMenu={() => { setIsCollapsed(true); setShowDrawer(true); }}
+            onAbrirMenu={() => { setIsCollapsed(false); setShowDrawer(true); }}
             onRegistrarGuardSalida={registrarGuardTemperatura}
           />
         )}
@@ -683,7 +620,6 @@ export default function App() {
       </main>
       {ModalLogout}
       {ModalAdvertencia}
-      {ModalInactividad}
     </div>
   );
 }

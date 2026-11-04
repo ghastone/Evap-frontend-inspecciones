@@ -73,6 +73,9 @@ export default function InspeccionModule({
   const [tabDefectos, setTabDefectos] = useState('calidad');
   const [showModalFinalizar, setShowModalFinalizar] = useState(false);
   const [showModalCancelar, setShowModalCancelar] = useState(false);
+  const [confirmandoCancelacionTotal, setConfirmandoCancelacionTotal] = useState(false);
+  const [anulandoCaja, setAnulandoCaja] = useState(false);
+  const [cancelandoProceso, setCancelandoProceso] = useState(false);
   const [showModalExitoGuardado, setShowModalExitoGuardado] = useState(false);
   const [mensajeExito, setMensajeExito] = useState('');
   const [haVistoCondicion, setHaVistoCondicion] = useState(false);
@@ -313,7 +316,7 @@ export default function InspeccionModule({
   };
   // 🔥 NUEVA LÓGICA DE GUARDADO EN TIEMPO REAL CAJA POR CAJA
   const guardarCaja = async () => {
-    if (procesoCerradoRemotamente) return;
+    if (procesoCerradoRemotamente || anulandoCaja || cancelandoProceso || guardandoCaja) return;
     if (!parametrosListos) return alert("Los parámetros de calificación aún no están disponibles.");
     if (!headerCompleto) return alert("Completa Muestra, Calibre, Temp pulpa (°C), Color de embalaje y °Brix.");
     const brixVal = parseFloat(cajaActual.brix);
@@ -416,36 +419,75 @@ export default function InspeccionModule({
     setCajaEnEdicion(null); setCajaIndexEdicion(null);
     setMensajeExito('Caja eliminada correctamente.'); setTimeout(() => setMensajeExito(''), 2200);
   };
+  // Anula solo el formulario de caja sin guardar ni borrar registros de otras cajas.
+  // En modo colaborativo se libera la reserva temporal del inspector, no la sesión.
+  const anularCajaActual = async () => {
+    if (anulandoCaja || guardandoCaja || cancelandoProceso || procesoCerradoRemotamente) return;
+    setAnulandoCaja(true);
+    try {
+      let siguienteCaja = cajas.length + 1;
+      if (isColaborativo && procesoIdBD) {
+        const respuesta = await fetch(`${API_URL}/api/procesos/colaborativo/cancelar-caja`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ procesoId: procesoIdBD, clientId: liveClientIdRef.current })
+        });
+        const resultado = await respuesta.json().catch(() => ({}));
+        if (!respuesta.ok || resultado.success !== true) {
+          throw new Error(resultado.error || 'No se pudo liberar la caja en revisión.');
+        }
+        // Obtener una reserva nueva mantiene la inspección del usuario abierta.
+        // El servidor puede asignar nuevamente el mismo número: no se guarda ninguna caja anulada.
+        siguienteCaja = await obtenerSiguienteCajaServidor();
+      }
+      setCajaActual(crearCajaVacia(siguienteCaja));
+      setHaVistoCondicion(false);
+      setTabDefectos('calidad');
+      setConfirmandoCancelacionTotal(false);
+      setShowModalCancelar(false);
+      setMensajeExito('Caja en revisión anulada. Puedes continuar con una nueva caja.');
+      setTimeout(() => setMensajeExito(''), 3200);
+    } catch (error) {
+      console.error('Error anulando la caja actual:', error);
+      alert(error.message || 'No se pudo anular la caja. Tus datos ingresados siguen disponibles para reintentar.');
+    } finally {
+      setAnulandoCaja(false);
+    }
+  };
+
+  // Cancelar el proceso completo es una decisión distinta: cierra la inspección
+  // para todos los participantes y conserva las cajas ya guardadas como Cancelado.
   const confirmarCancelarProceso = async () => {
+    if (cancelandoProceso || guardandoCaja || anulandoCaja || procesoCerradoRemotamente) return;
+    setCancelandoProceso(true);
     try {
       if (isColaborativo && procesoIdBD) {
-        if (usuariosEnInspeccion > 1) {
-          const resAbandonar = await fetch(`${API_URL}/api/procesos/colaborativo/abandonar`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ procesoId: procesoIdBD, clientId: liveClientIdRef.current })
-          });
-          const dataAbandonar = await resAbandonar.json().catch(() => ({}));
-          if (!resAbandonar.ok) throw new Error(dataAbandonar.error || 'No se pudo abandonar la inspección.');
-        } else {
-          const resCancelar = await fetch(`${API_URL}/api/procesos/colaborativo/descartar`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ procesoId: procesoIdBD, clientId: liveClientIdRef.current, forzar: true })
-          });
-          const dataCancelar = await resCancelar.json().catch(() => ({}));
-          if (!resCancelar.ok) throw new Error(dataCancelar.error || 'No se pudo cancelar el proceso.');
+        const respuesta = await fetch(`${API_URL}/api/procesos/colaborativo/descartar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ procesoId: procesoIdBD, clientId: liveClientIdRef.current, forzar: true })
+        });
+        const resultado = await respuesta.json().catch(() => ({}));
+        if (!respuesta.ok || resultado.success !== true) {
+          throw new Error(resultado.error || 'No se pudo cancelar el proceso completo.');
         }
-      } else {
-        await fetch(`${API_URL}/api/live`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
       }
-    } catch (err) {
-      console.error('Error al salir de inspección colaborativa:', err);
-      alert(err.message || 'No se pudo cancelar la inspección.');
-      return;
+      await fetch(`${API_URL}/api/live`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clearClientId: liveClientIdRef.current })
+      }).catch(() => {});
+      limpiarBorrador();
+      limpiarClientePersistente();
+      localStorage.removeItem('inspeccionActiva');
+      setConfirmandoCancelacionTotal(false);
+      setShowModalCancelar(false);
+      if (onVolver) onVolver();
+    } catch (error) {
+      console.error('Error cancelando proceso completo:', error);
+      alert(error.message || 'No fue posible cancelar el proceso. La inspección continúa abierta.');
+    } finally {
+      setCancelandoProceso(false);
     }
-    limpiarBorrador(); limpiarClientePersistente();
-    localStorage.removeItem('inspeccionActiva');
-    setShowModalCancelar(false);
-    if (onVolver) onVolver();
   };
   const abandonarInspeccion = async () => {
     if (!isColaborativo || !procesoIdBD || usuariosEnInspeccion <= 1 || abandonando) return;
@@ -878,11 +920,20 @@ export default function InspeccionModule({
         {/* 2. TARJETA: EVALUANDO NUEVA CAJA */}
         <div className="bg-[#ffffff] border border-[#e2e8f0] rounded-2xl p-4 md:px-6 md:py-4 shadow-sm w-full relative mb-3 animate-fade-in-up delay-3">
           {cajaEnEdicion && <div className="absolute inset-0 bg-white/70 backdrop-blur-[2px] z-10 rounded-2xl"></div>}
-          <div className="flex items-center justify-between mb-3 border-b border-[#f1f5f9] pb-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3 border-b border-[#f1f5f9] pb-3">
             <span className="text-[#1e293b] font-semibold text-sm md:text-lg tracking-tight">
               Evaluando nueva caja {isColaborativo ? <span className="text-[#64748b] text-xs md:text-sm font-bold ml-2">(el orden se asigna al guardar)</span> : <span className="text-[#ea580c] text-lg md:text-xl font-bold ml-1">#{cajaActual.numCaja}</span>}
             </span>
-            <div className="flex items-center gap-2 md:gap-3 text-[11px] md:text-sm font-semibold">
+            <div className="flex flex-wrap items-center gap-1.5 md:gap-3 text-[11px] md:text-sm font-semibold">
+              <button
+                type="button"
+                onClick={() => { setConfirmandoCancelacionTotal(false); setShowModalCancelar(true); }}
+                disabled={cajaEnEdicion !== null || guardandoCaja || anulandoCaja || cancelandoProceso || Boolean(procesoCerradoRemotamente)}
+                title="Anular la caja sin guardar sus datos"
+                className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-700 transition-colors hover:bg-amber-100 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <X className="h-3.5 w-3.5" /> Anular caja
+              </button>
               <span className="text-[#64748b] hidden sm:inline">Rendimiento:</span>
               <span className="bg-[#ffedd5] text-[#ea580c] px-2 py-1 md:px-3 rounded-lg border border-[#fed7aa]">Cal: {rend.cal}%</span>
               <span className="bg-[#ffe4e6] text-[#e11d48] px-2 py-1 md:px-3 rounded-lg border border-[#fecaca]">Cond: {rend.cond}%</span>
@@ -1027,16 +1078,16 @@ export default function InspeccionModule({
         </div>
         {/* 4. BOTONES DE ACCIÓN */}
         <div className="pt-2 pb-6 md:pb-12 flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 w-full animate-fade-in-up delay-4">
-          <button onClick={() => setShowModalCancelar(true)} disabled={cajaEnEdicion !== null || guardandoCaja} className={`btn-cancel group ${cajaEnEdicion !== null || guardandoCaja ? 'btn-disabled' : ''}`}>
+          <button onClick={() => { setConfirmandoCancelacionTotal(false); setShowModalCancelar(true); }} disabled={cajaEnEdicion !== null || guardandoCaja || anulandoCaja || cancelandoProceso || Boolean(procesoCerradoRemotamente)} className={`btn-cancel group ${cajaEnEdicion !== null || guardandoCaja || anulandoCaja || cancelandoProceso || procesoCerradoRemotamente ? 'btn-disabled' : ''}`}>
             <ArrowLeft className="w-4 h-4 transition-transform duration-200 group-hover:-translate-x-1" />
-            <span>Cancelar</span>
+            <span>Cancelar / Anular</span>
           </button>
           {isColaborativo && usuariosEnInspeccion > 1 && (
             <button onClick={abandonarInspeccion} disabled={cajaEnEdicion !== null || guardandoCaja || abandonando} className={`inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl border border-[#cbd5e1] bg-white text-[#475569] font-semibold text-sm hover:bg-[#f8fafc] hover:text-[#0f172a] transition-all ${cajaEnEdicion !== null || guardandoCaja || abandonando ? 'opacity-50 pointer-events-none' : ''}`}>
               <LogOut className="w-4 h-4" /> {abandonando ? 'Abandonando...' : 'Abandonar inspección'}
             </button>
           )}
-          <button onClick={guardarCaja} disabled={!headerCompleto || !parametrosListos || cajaEnEdicion !== null || !haVistoCondicion || guardandoCaja} className={`btn-primary group ${(!headerCompleto || !parametrosListos || cajaEnEdicion !== null || !haVistoCondicion || guardandoCaja) ? 'btn-disabled' : ''}`}>
+          <button onClick={guardarCaja} disabled={!headerCompleto || !parametrosListos || cajaEnEdicion !== null || !haVistoCondicion || guardandoCaja || anulandoCaja || cancelandoProceso} className={`btn-primary group ${(!headerCompleto || !parametrosListos || cajaEnEdicion !== null || !haVistoCondicion || guardandoCaja || anulandoCaja || cancelandoProceso) ? 'btn-disabled' : ''}`}>
             {guardandoCaja ? (
               <span className="flex items-center gap-2">
                 <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
@@ -1046,7 +1097,7 @@ export default function InspeccionModule({
               <span>{(!haVistoCondicion && headerCompleto && cajaEnEdicion === null) ? 'Revisa Condición para Guardar' : 'Guardar y Siguiente'}</span>
             )}
           </button>
-          <button onClick={abrirModalFinalizar} disabled={cajaEnEdicion !== null || guardandoCaja || !parametrosListos || requiereRevisionCondicion || !fotosCompletas || procesoCerradoRemotamente} className={`btn-success group shrink-0 ${cajaEnEdicion !== null || guardandoCaja || !parametrosListos || requiereRevisionCondicion || !fotosCompletas || procesoCerradoRemotamente ? 'btn-disabled' : ''}`}>
+          <button onClick={abrirModalFinalizar} disabled={cajaEnEdicion !== null || guardandoCaja || anulandoCaja || cancelandoProceso || !parametrosListos || requiereRevisionCondicion || !fotosCompletas || procesoCerradoRemotamente} className={`btn-success group shrink-0 ${cajaEnEdicion !== null || guardandoCaja || anulandoCaja || cancelandoProceso || !parametrosListos || requiereRevisionCondicion || !fotosCompletas || procesoCerradoRemotamente ? 'btn-disabled' : ''}`}>
             <Check className="w-4 h-4 transition-transform duration-200 group-hover:scale-110" />
             <span>{!fotosCompletas ? 'Faltan fotografías' : requiereRevisionCondicion ? 'Revisa Condición para Finalizar' : 'Finalizar Proceso'}</span>
           </button>
@@ -1110,17 +1161,45 @@ export default function InspeccionModule({
         </div>
       )}
       {showModalCancelar && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0f172a]/60 backdrop-blur-sm p-4 animate-fade-in-up">
-          <div className="bg-[#ffffff] rounded-2xl shadow-[0_20px_25px_-5px_rgba(0,0,0,0.1)] w-full max-w-md p-6 md:p-8 border border-[#e2e8f0]">
-            <div className="flex flex-col items-center text-center">
-              <div className="w-14 h-14 bg-[#fef2f2] text-[#e11d48] rounded-full flex items-center justify-center mb-5"><AlertTriangle className="w-7 h-7" /></div>
-              <h3 className="text-xl font-bold text-[#0f172a] mb-2">Cancelar Inspección</h3>
-              <p className="text-[#64748b] mb-8 text-sm leading-relaxed">{isColaborativo ? usuariosEnInspeccion > 1 ? <>La caja actual no se guardará y abandonarás esta inspección. El proceso <span className="font-bold text-[#0f172a]">continuará activo</span> para los demás usuarios.</> : <>La caja actual no se guardará. Si existen cajas guardadas, se conservarán en el historial y el proceso quedará <span className="font-bold text-[#e11d48]">Cancelado</span>. Si todavía está vacío, se eliminará automáticamente. En ambos casos podrás iniciar una nueva inspección.</> : <>¿Estás seguro de cancelar la inspección y volver al menú principal? Los datos de esta caja <span className="font-bold text-[#0f172a]">no se guardarán</span>.</>}</p>
-              <div className="flex gap-3 w-full">
-                <button onClick={() => setShowModalCancelar(false)} className="flex-1 py-2.5 rounded-lg border border-[#e2e8f0] text-[#334155] font-semibold hover:bg-[#f8fafc] text-sm transition-colors">Continuar editando</button>
-                <button onClick={confirmarCancelarProceso} className="flex-1 py-2.5 rounded-lg bg-[#e11d48] hover:bg-[#be123c] text-white font-semibold shadow-sm text-sm transition-colors">Sí, salir</button>
-              </div>
-            </div>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#0f172a]/60 backdrop-blur-sm p-4 animate-fade-in-up">
+          <div role="dialog" aria-modal="true" aria-labelledby="titulo-opciones-cancelacion" className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-7">
+            {confirmandoCancelacionTotal ? (
+              <>
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-red-200 bg-red-50 text-red-600"><AlertTriangle className="h-6 w-6" /></div>
+                <h3 id="titulo-opciones-cancelacion" className="text-lg font-extrabold text-slate-900">Confirmar cancelación del proceso</h3>
+                <p className="mt-2 text-[13px] leading-5 text-slate-600">
+                  Se cancelará por completo el proceso <strong>N° {numProceso}</strong>. {isColaborativo ? 'Las cajas ya guardadas se conservarán en el historial con estado Cancelado.' : 'Se descartarán los datos locales de esta inspección.'} La caja sin guardar se perderá.
+                </p>
+                {isColaborativo && usuariosEnInspeccion > 1 && (
+                  <p className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-[12px] font-medium leading-5 text-red-700">
+                    <strong>Atención:</strong> hay otros inspectores conectados. Esta acción cerrará el proceso también para ellos e impedirá guardar sus cajas pendientes.
+                  </p>
+                )}
+                <div className="mt-5 grid grid-cols-2 gap-2">
+                  <button type="button" disabled={cancelandoProceso} onClick={() => setConfirmandoCancelacionTotal(false)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Volver</button>
+                  <button type="button" disabled={cancelandoProceso} onClick={confirmarCancelarProceso} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-red-600 px-3 text-xs font-bold text-white hover:bg-red-700 disabled:opacity-60">
+                    <Trash2 className="h-4 w-4" /> {cancelandoProceso ? 'Cancelando...' : 'Sí, cancelar proceso'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-600"><AlertTriangle className="h-6 w-6" /></div>
+                <h3 id="titulo-opciones-cancelacion" className="text-lg font-extrabold text-slate-900">¿Qué deseas cancelar?</h3>
+                <p className="mt-1.5 text-[13px] leading-5 text-slate-500">Elige si deseas descartar solamente la caja que estás revisando o cerrar todo el proceso.</p>
+                <div className="mt-5 space-y-2">
+                  <button type="button" onClick={anularCajaActual} disabled={anulandoCaja || cancelandoProceso || guardandoCaja} className="flex w-full items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3.5 text-left transition-all hover:border-amber-300 hover:bg-amber-100 active:scale-[0.99] disabled:opacity-60">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-amber-600"><X className="h-5 w-5" /></span>
+                    <span className="flex-1"><span className="block text-[13px] font-bold text-slate-900">{anulandoCaja ? 'Anulando caja...' : 'Anular solo esta caja'}</span><span className="mt-0.5 block text-[11px] leading-4 text-slate-600">Descarta sus datos sin salir de la inspección. No afecta las cajas guardadas.</span></span>
+                  </button>
+                  <button type="button" onClick={() => setConfirmandoCancelacionTotal(true)} disabled={anulandoCaja || cancelandoProceso || guardandoCaja} className="flex w-full items-center gap-3 rounded-xl border border-red-200 bg-white px-3.5 py-3.5 text-left transition-all hover:border-red-300 hover:bg-red-50 active:scale-[0.99] disabled:opacity-60">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-50 text-red-600"><Trash2 className="h-5 w-5" /></span>
+                    <span className="flex-1"><span className="block text-[13px] font-bold text-red-700">Cancelar todo el proceso</span><span className="mt-0.5 block text-[11px] leading-4 text-slate-600">Cierra la inspección para todos los usuarios. Requiere confirmación adicional.</span></span>
+                  </button>
+                </div>
+                <button type="button" onClick={() => setShowModalCancelar(false)} disabled={anulandoCaja || cancelandoProceso} className="mt-4 h-10 w-full rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50">Seguir evaluando esta caja</button>
+              </>
+            )}
           </div>
         </div>
       )}

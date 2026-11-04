@@ -1,12 +1,22 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Search, Filter, MoreVertical, Edit3, Trash2,
-  ChevronLeft, ChevronRight, ArrowLeft, Save, AlertTriangle, Plus, X, Check, Download, Eye, RefreshCw, Loader2, UserRound
+  ChevronLeft, ChevronRight, ArrowLeft, Save, AlertTriangle, Plus, X, Check, Download, Eye, RefreshCw, Loader2, Menu
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas-pro';
 import PlantillaInforme from './PlantillaInforme';
+import FotografiasProceso from '../inspeccion/FotografiasProceso';
 import { API_URL } from '../../config/api.js';
+// Evita caracteres reservados en Windows/macOS, sin recurrir a guiones bajos.
+const limpiarNombreArchivo = (valor) => String(valor ?? '')
+  .replace(/[\\/:*?"<>|\u0000-\u001f]/g, ' ')
+  .replace(/_/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .replace(/[. ]+$/g, '')
+  .slice(0, 90) || 'Sin dato';
 // Exportación XLSX sin dependencias adicionales. El archivo ZIP contiene OpenXML válido.
 const excelXmlEscape = valor => String(valor ?? '')
   .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
@@ -236,7 +246,7 @@ const nombreUsuarioCaja = caja => {
   const nombre = String(caja?.usuario || caja?.usuarioNombre || caja?.username || '').trim();
   return nombre && nombre.toLowerCase() !== 'usuario' ? nombre : 'Sin registro';
 };
-export default function HistorialProcesosView({ onVerResumen, userRole, usuarioId, usuarioNombre, puedeEditar = false, puedeEliminar = false }) {
+export default function HistorialProcesosView({ onVerResumen, onAbrirMenu = null, userRole, usuarioId, usuarioNombre, puedeEditar = false, puedeEliminar = false }) {
   const [procesos, setProcesos] = useState([]);
   const [cargando, setCargando] = useState(true);
   const [procesoSeleccionado, setProcesoSeleccionado] = useState(null);
@@ -248,6 +258,7 @@ export default function HistorialProcesosView({ onVerResumen, userRole, usuarioI
   const [filtroFecha, setFiltroFecha] = useState('');
   const [filtroCalificacion, setFiltroCalificacion] = useState('');
   const [filtroTemporada, setFiltroTemporada] = useState('');
+  const esAdministrador = ['admin', 'administrador'].includes(String(userRole ?? '').trim().toLowerCase());
   const [exportandoExcel, setExportandoExcel] = useState(false);
   const [errorSincronizacion, setErrorSincronizacion] = useState('');
   const [ultimaSincronizacion, setUltimaSincronizacion] = useState(null);
@@ -258,6 +269,53 @@ export default function HistorialProcesosView({ onVerResumen, userRole, usuarioI
   const [parametrosActuales, setParametrosActuales] = useState({ calidad: [], condicion: [] });
   // Menús y modales
   const [menuProcesoAbiertoId, setMenuProcesoAbiertoId] = useState(null);
+  const [menuEscritorioPosicion, setMenuEscritorioPosicion] = useState(null);
+  const menuEscritorioRef = useRef(null);
+  const botonMenuEscritorioRef = useRef(null);
+
+  // Posiciona las opciones fuera del contenedor con overflow-x-auto de la tabla.
+  const alternarMenuEscritorio = (evento, id) => {
+    evento.stopPropagation();
+    if (menuProcesoAbiertoId === id) {
+      setMenuProcesoAbiertoId(null);
+      setMenuEscritorioPosicion(null);
+      return;
+    }
+    const rect = evento.currentTarget.getBoundingClientRect();
+    const ancho = 256;
+    const altoEstimado = (puedeEditar ? 112 : 0) + (puedeEliminar ? 56 : 0) + 62;
+    const margen = 10;
+    const izquierda = Math.max(margen, Math.min(rect.right - ancho, window.innerWidth - ancho - margen));
+    const cabeAbajo = window.innerHeight - rect.bottom >= altoEstimado + margen;
+    const arriba = rect.top >= altoEstimado + margen;
+    const superior = cabeAbajo || !arriba
+      ? Math.max(margen, Math.min(rect.bottom + 6, window.innerHeight - Math.min(altoEstimado, window.innerHeight - 2 * margen) - margen))
+      : Math.max(margen, rect.top - altoEstimado - 6);
+    botonMenuEscritorioRef.current = evento.currentTarget;
+    setMenuEscritorioPosicion({ top: superior, left: izquierda });
+    setMenuProcesoAbiertoId(id);
+  };
+
+  useEffect(() => {
+    if (!menuEscritorioPosicion || menuProcesoAbiertoId == null) return;
+    const cerrar = () => {
+      setMenuProcesoAbiertoId(null);
+      setMenuEscritorioPosicion(null);
+    };
+    const cerrarSiFuera = (evento) => {
+      if (menuEscritorioRef.current?.contains(evento.target)) return;
+      if (botonMenuEscritorioRef.current?.contains(evento.target)) return;
+      cerrar();
+    };
+    document.addEventListener('pointerdown', cerrarSiFuera);
+    window.addEventListener('scroll', cerrar, true);
+    window.addEventListener('resize', cerrar);
+    return () => {
+      document.removeEventListener('pointerdown', cerrarSiFuera);
+      window.removeEventListener('scroll', cerrar, true);
+      window.removeEventListener('resize', cerrar);
+    };
+  }, [menuProcesoAbiertoId, menuEscritorioPosicion]);
   const [procesoAEliminar, setProcesoAEliminar] = useState(null);
   // Paginación de lista
   const [paginaActual, setPaginaActual] = useState(1);
@@ -275,6 +333,7 @@ export default function HistorialProcesosView({ onVerResumen, userRole, usuarioI
   const [datosReporte, setDatosReporte] = useState(null);
   const [generandoReporteId, setGenerandoReporteId] = useState(null);
   const [datosVistaPrevia, setDatosVistaPrevia] = useState(null);
+  const [fotosEdicion, setFotosEdicion] = useState({ procesoId: null, light: false, dark: false, cargando: false, error: '' });
   const [cargandoVistaPreviaId, setCargandoVistaPreviaId] = useState(null);
   const [zoomVistaPrevia, setZoomVistaPrevia] = useState(1);
   const reporteRef = useRef();
@@ -560,7 +619,10 @@ export default function HistorialProcesosView({ onVerResumen, userRole, usuarioI
       const posX = (pdfWidth - anchoInforme) / 2;
       const posY = (pdfPageHeight - altoInforme) / 2;
       pdf.addImage(imgData, 'PNG', posX, posY, anchoInforme, altoInforme);
-      pdf.save(`Informe_Proceso_${procesoEncontrado.numProceso || procesoId}.pdf`);
+      const nombreProceso = limpiarNombreArchivo(datosCompletos.numProceso || procesoEncontrado?.numProceso || procesoId);
+      const nombreHuerto = limpiarNombreArchivo(datosCompletos.huerto || datosCompletos.productor || procesoEncontrado?.huerto || procesoEncontrado?.productor || 'Sin huerto');
+      // '：' tiene aspecto de dos puntos, pero es válido como carácter de archivo en Windows.
+      pdf.save(`Informe de calidad, proceso N°${nombreProceso}, Huerto：${nombreHuerto}.pdf`);
     } catch (error) {
       console.error("Error exacto al generar PDF:", error);
       alert(`Error técnico: ${error.message}`);
@@ -572,6 +634,21 @@ export default function HistorialProcesosView({ onVerResumen, userRole, usuarioI
   };
   const abrirEdicionProceso = (proceso) => {
     if (!proceso) return;
+    const idFotos = proceso.id || proceso._id;
+    // La lista /api/inspecciones no incluye las imágenes completas; consultamos
+    // solo el estado al abrir edición para no descargar fotos de todos los procesos.
+    setFotosEdicion({ procesoId: idFotos, light: false, dark: false, cargando: true, error: '' });
+    fetch(`${API_URL}/api/procesos/${idFotos}/informe`, { cache: 'no-store' })
+      .then(async respuesta => {
+        if (!respuesta.ok) throw new Error(`No se pudieron consultar las fotografías (HTTP ${respuesta.status}).`);
+        return respuesta.json();
+      })
+      .then(datos => setFotosEdicion(actual => actual.procesoId !== idFotos ? actual : {
+        procesoId: idFotos, light: Boolean(datos.fotoLight), dark: Boolean(datos.fotoDark), cargando: false, error: ''
+      }))
+      .catch(error => setFotosEdicion(actual => actual.procesoId !== idFotos ? actual : {
+        ...actual, cargando: false, error: error.message || 'No se pudo cargar el estado de las fotografías.'
+      }));
     const listaCajas = Array.isArray(proceso.cajas) ? proceso.cajas : [];
     const { nombresCalidad, nombresCondicion } = obtenerCatalogoProceso(proceso);
     const cajasNormalizadas = listaCajas.map((c, i) => ({
@@ -961,11 +1038,18 @@ export default function HistorialProcesosView({ onVerResumen, userRole, usuarioI
         `}</style>
         {/* Vista móvil: independiente del diseño de escritorio, comparte sus datos y acciones. */}
         <div className="md:hidden mx-auto max-w-md min-h-full pb-8" style={{ fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }} onClick={(e) => { e.stopPropagation(); setMenuProcesoAbiertoId(null); setConfirmacionResumenMovilId(null); }}>
-          <header className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-slate-200/70 bg-[#f8faff]/95 px-4 py-4 backdrop-blur-md">
-            <h1 className="min-w-0 text-[20px] font-extrabold tracking-tight text-slate-900">Historial de procesos</h1>
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-700 text-white shadow-sm" title={usuarioNombre || userRole || 'Usuario de EVAP'}>
-              <UserRound className="h-[19px] w-[19px]" aria-hidden="true" />
-            </span>
+          <header className="sticky top-0 z-30 border-b border-slate-200/70 bg-[#f8faff]/95 px-4 py-4 backdrop-blur-md">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onAbrirMenu?.(); }}
+                aria-label="Abrir menú lateral"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition-all hover:bg-slate-50 active:scale-95"
+              >
+                <Menu className="h-[18px] w-[18px]" />
+              </button>
+              <h1 className="min-w-0 flex-1 truncate text-[20px] font-extrabold tracking-tight text-slate-900">Historial de procesos</h1>
+            </div>
           </header>
 
           <div className="space-y-3 px-4 pt-3">
@@ -1050,23 +1134,25 @@ export default function HistorialProcesosView({ onVerResumen, userRole, usuarioI
                   type="button"
                   onClick={cargarDatos}
                   disabled={cargando}
-                  className="group inline-flex h-9 items-center gap-1.5 rounded-lg bg-slate-800 px-3 text-[12px] font-semibold text-white shadow-sm transition-all hover:bg-slate-700 active:scale-95 disabled:cursor-wait disabled:opacity-60"
+                  className="group inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 shadow-sm transition-all hover:border-amber-300 hover:bg-amber-50 active:scale-95 disabled:cursor-wait disabled:opacity-60"
                   aria-label="Actualizar historial"
                 >
                   <RefreshCw className={`h-3.5 w-3.5 text-amber-400 transition-transform duration-500 ${cargando ? 'animate-spin' : 'group-hover:rotate-180'}`} />
                   {cargando ? 'Cargando' : 'Actualizar'}
                   {!cargando && <span className="h-1.5 w-1.5 rounded-full bg-amber-400"></span>}
                 </button>
-                <button
-                  type="button"
-                  onClick={exportarHistorialCompletoExcel}
-                  disabled={exportandoExcel}
-                  aria-label="Exportar historial completo a Excel"
-                  title="Exportar todos los procesos de la planta a Excel"
-                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition-all hover:bg-slate-50 active:scale-95 disabled:cursor-wait disabled:opacity-60"
-                >
-                  {exportandoExcel ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                </button>
+                {esAdministrador && (
+                  <button
+                    type="button"
+                    onClick={exportarHistorialCompletoExcel}
+                    disabled={exportandoExcel}
+                    aria-label="Exportar historial completo a Excel"
+                    title="Exportar todos los procesos de la planta a Excel"
+                    className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition-all hover:bg-slate-50 active:scale-95 disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {exportandoExcel ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1138,6 +1224,11 @@ export default function HistorialProcesosView({ onVerResumen, userRole, usuarioI
                                 <Edit3 className="h-4 w-4 text-blue-600" /> Editar proceso {isEnCurso ? '(En curso)' : ''}
                               </button>
                             )}
+                            {puedeEditar && (
+                              <button type="button" disabled={isEnCurso} onClick={() => { setMenuProcesoAbiertoId(null); abrirVistaPrevia(id); }} className="flex w-full items-center gap-2.5 px-3 py-3 text-[12px] font-semibold text-slate-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40">
+                                <Eye className="h-4 w-4 text-amber-600" /> Modificar fotografías {isEnCurso ? '(En curso)' : ''}
+                              </button>
+                            )}
                             <button type="button" disabled={isEnCurso || generandoReporteId === id} onClick={() => { setMenuProcesoAbiertoId(null); descargarPDF(id); }} className="flex w-full items-center gap-2.5 px-3 py-3 text-[12px] font-semibold text-slate-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40">
                               <Download className="h-4 w-4 text-emerald-600" /> {generandoReporteId === id ? 'Generando PDF...' : 'Descargar informe PDF'}
                             </button>
@@ -1185,7 +1276,7 @@ export default function HistorialProcesosView({ onVerResumen, userRole, usuarioI
                         aria-label={`Ver informe resumen del proceso ${proc.numProceso}`}
                         aria-expanded={confirmarAbierto}
                         disabled={cargandoVistaPreviaId === id}
-                        className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-500 text-white shadow-sm transition-all hover:bg-amber-600 active:scale-95 disabled:cursor-wait disabled:opacity-60"
+                        className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#2563EB] text-white shadow-sm transition-all hover:bg-[#1D4ED8] active:scale-95 disabled:cursor-wait disabled:opacity-60"
                       >
                         {cargandoVistaPreviaId === id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
                       </button>
@@ -1242,15 +1333,17 @@ export default function HistorialProcesosView({ onVerResumen, userRole, usuarioI
                 <p className="mt-1 text-sm text-slate-500">Módulo de gestión y revisión de procesos sincronizados</p>
               </div>
               <div className="flex flex-wrap items-center gap-3 lg:justify-end">
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); exportarHistorialCompletoExcel(); }}
-                  disabled={exportandoExcel}
-                  className="group inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-all hover:-translate-y-[1px] hover:border-slate-300 hover:bg-slate-50 active:scale-[0.97] disabled:cursor-wait disabled:opacity-60"
-                >
-                  {exportandoExcel ? <Loader2 className="w-4 h-4 animate-spin text-emerald-600" /> : <Download className="w-4 h-4 text-emerald-600 transition-transform duration-300 group-hover:translate-y-0.5" />}
-                  {exportandoExcel ? 'Generando Excel...' : 'Exportar Planilla'}
-                </button>
+                {esAdministrador && (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); exportarHistorialCompletoExcel(); }}
+                    disabled={exportandoExcel}
+                    className="group inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition-all hover:-translate-y-[1px] hover:border-slate-300 hover:bg-slate-50 active:scale-[0.97] disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {exportandoExcel ? <Loader2 className="w-4 h-4 animate-spin text-emerald-600" /> : <Download className="w-4 h-4 text-emerald-600 transition-transform duration-300 group-hover:translate-y-0.5" />}
+                    {exportandoExcel ? 'Generando Excel...' : 'Exportar Planilla'}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); cargarDatos(); }}
@@ -1425,11 +1518,18 @@ export default function HistorialProcesosView({ onVerResumen, userRole, usuarioI
                               {proc.cajas ? proc.cajas.length : 0}
                             </td>
                             <td className="relative px-4 py-3 text-center align-middle">
-                              <button onClick={(e) => { e.stopPropagation(); setMenuProcesoAbiertoId(menuProcesoAbiertoId === proc.id ? null : proc.id); }} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600" title="Opciones del proceso">
+                              <button type="button" onClick={(e) => alternarMenuEscritorio(e, proc.id)} aria-haspopup="menu" aria-expanded={menuProcesoAbiertoId === proc.id} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600" title="Opciones del proceso">
                                 <MoreVertical className="w-4 h-4" />
                               </button>
-                              {menuProcesoAbiertoId === proc.id && (
-                                <div className="absolute right-4 top-12 z-30 flex w-56 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-xl divide-y divide-slate-100" onClick={(e) => e.stopPropagation()}>
+                              {menuProcesoAbiertoId === proc.id && menuEscritorioPosicion && typeof document !== 'undefined' && createPortal(
+                                <div
+                                  ref={menuEscritorioRef}
+                                  role="menu"
+                                  aria-label={`Acciones del proceso ${proc.numProceso}`}
+                                  className="fixed z-[200] flex w-64 flex-col overflow-y-auto rounded-2xl border border-slate-200 bg-white text-left shadow-2xl divide-y divide-slate-100"
+                                  style={{ top: menuEscritorioPosicion.top, left: menuEscritorioPosicion.left, maxHeight: 'calc(100dvh - 20px)' }}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
                                   {puedeEditar && (
                                     <button
                                       onClick={() => !isEnCurso && abrirEdicionProceso(proc)}
@@ -1441,6 +1541,12 @@ export default function HistorialProcesosView({ onVerResumen, userRole, usuarioI
                                         <span className={isEnCurso ? 'text-slate-500' : ''}>Editar proceso</span>
                                         {isEnCurso && <span className="mt-0.5 text-[9px] font-bold uppercase text-rose-600">Bloqueado (En curso)</span>}
                                       </div>
+                                    </button>
+                                  )}
+                                  {puedeEditar && (
+                                    <button type="button" onClick={() => !isEnCurso && (setMenuProcesoAbiertoId(null), abrirVistaPrevia(proc.id))} disabled={isEnCurso} className={`flex w-full items-center gap-3 px-4 py-3.5 text-xs font-bold transition-colors ${isEnCurso ? 'cursor-not-allowed bg-slate-50 opacity-50' : 'text-slate-700 hover:bg-amber-50'}`}>
+                                      <Eye className={`h-4 w-4 ${isEnCurso ? 'text-slate-400' : 'text-amber-600'}`} />
+                                      <span>Modificar fotografías</span>
                                     </button>
                                   )}
                                   <button
@@ -1467,7 +1573,8 @@ export default function HistorialProcesosView({ onVerResumen, userRole, usuarioI
                                       </div>
                                     </button>
                                   )}
-                                </div>
+                                </div>,
+                                document.body
                               )}
                             </td>
                           </tr>
@@ -1555,6 +1662,23 @@ export default function HistorialProcesosView({ onVerResumen, userRole, usuarioI
                   <button onClick={() => setDatosVistaPrevia(null)} className="p-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"><X className="w-5 h-5" /></button>
                 </div>
               </div>
+              {puedeEditar && datosVistaPrevia.estado !== 'En curso' && (
+                <div className="border-b border-amber-100 bg-amber-50/50 px-4 py-3 sm:px-6">
+                  <p className="mb-1.5 text-[11px] font-semibold text-slate-600">Puedes añadir o reemplazar las fotografías de este proceso finalizado sin modificar la inspección.</p>
+                  <FotografiasProceso
+                    apiUrl={API_URL}
+                    procesoId={datosVistaPrevia.id || datosVistaPrevia._id || datosVistaPrevia.proceso_id}
+                    modoHistorial
+                    lightOk={Boolean(datosVistaPrevia.fotoLight)}
+                    darkOk={Boolean(datosVistaPrevia.fotoDark)}
+                    onPhotoSaved={({ tipo, imagen }) => setDatosVistaPrevia(prev => prev ? {
+                      ...prev,
+                      fotoLight: tipo === 'light' ? imagen : prev.fotoLight,
+                      fotoDark: tipo === 'dark' ? imagen : prev.fotoDark
+                    } : prev)}
+                  />
+                </div>
+              )}
               <div className="flex-1 overflow-auto bg-slate-200 p-2 sm:p-6 custom-scrollbar" onTouchStart={iniciarPinch} onTouchMove={moverPinch} onTouchEnd={terminarPinch} onTouchCancel={terminarPinch}>
                 <div className="min-w-full flex justify-center items-start">
                   <div className="relative shrink-0" style={{ width: `${816 * zoomVistaPrevia}px`, height: `${1056 * zoomVistaPrevia}px` }}>
@@ -1620,6 +1744,26 @@ export default function HistorialProcesosView({ onVerResumen, userRole, usuarioI
             <div><label className="text-xs font-bold text-slate-500 block mb-1">Variedad</label><select value={procesoEnEdicion?.variedad || ''} onChange={(e) => setProcesoEnEdicion({ ...procesoEnEdicion, variedad: e.target.value })} className="w-full h-10 border border-slate-300 rounded-xl px-3 font-bold text-xs bg-white outline-none focus:border-[#E96008]">{variedades.map((v, idx) => <option key={idx} value={v.nombre || v}>{v.nombre || v}</option>)}</select></div>
           </div>
         </div>
+        {puedeEditar && procesoEnEdicion?.estado !== 'En curso' && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+            <h2 className="mb-1 text-sm font-extrabold uppercase tracking-wider text-slate-800">Fotografías del proceso</h2>
+            <p className="mb-3 text-xs text-slate-500">Agrega o reemplaza las fotografías Light y Dark del proceso cerrado. Se guardan inmediatamente en el servidor, sin alterar las cajas ni la calificación.</p>
+            {fotosEdicion.error && <p role="alert" className="mb-2 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700">{fotosEdicion.error}</p>}
+            {fotosEdicion.cargando ? (
+              <p className="text-xs font-medium text-slate-500">Consultando fotografías guardadas...</p>
+            ) : (
+              <FotografiasProceso
+                apiUrl={API_URL}
+                procesoId={procesoEnEdicion.id || procesoEnEdicion._id}
+                modoHistorial
+                lightOk={fotosEdicion.light}
+                darkOk={fotosEdicion.dark}
+                onPhotoSaved={({ tipo }) => setFotosEdicion(prev => ({ ...prev, [tipo]: true }))}
+              />
+            )}
+          </div>
+        )}
+
         {/* RESTO DE LA VISTA DE EDICIÓN */}
         <div className="bg-[#E96008] rounded-2xl px-5 py-4 text-white shadow-md w-full">
           <h2 className="font-extrabold mb-3 text-xs md:text-sm tracking-wide uppercase opacity-95">Resumen de Proceso en Tiempo Real</h2>
