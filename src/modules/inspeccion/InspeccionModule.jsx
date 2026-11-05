@@ -4,8 +4,17 @@ import {
   Trash2, X, ArrowLeft
 } from 'lucide-react';
 import FotografiasProceso from './FotografiasProceso';
+import { API_URL } from '../../config/api.js';
 const SUM_CALIDAD = 'Sumatoria de calidad';
 const SUM_CONDICION = 'Sumatoria de condición';
+// El valor 0 °C es válido. Acepta coma/punto y hasta dos decimales.
+const leerTempPulpa = valor => {
+  if (valor == null || String(valor).trim() === '') return null;
+  const texto = String(valor).trim().replace(',', '.');
+  if (!/^-?\d{1,4}(?:\.\d{1,2})?$/.test(texto)) return null;
+  const numero = Number(texto);
+  return Number.isFinite(numero) ? numero : null;
+};
 const crearMapaDefectos = nombres => Object.fromEntries(nombres.map(nombre => [nombre, 0]));
 const sincronizarMapa = (actual, nombres) => Object.fromEntries(nombres.map(nombre => [nombre, actual?.[nombre] ?? 0]));
 const sumarDefectos = (mapa, nombres) => nombres.reduce((total, nombre) => total + (parseInt(mapa?.[nombre]) || 0), 0);
@@ -17,6 +26,16 @@ const nivelPorLimite = (pct, lim1, lim2) => {
   if (lim1 === null || lim2 === null) return 1;
   return pct > lim2 ? 3 : pct > lim1 ? 2 : 1;
 };
+// Ficha compacta para el resumen móvil; no altera los cálculos existentes.
+const MetricaAcumuladaMovil = ({ etiqueta, children, claseValor = '' }) => (
+  <div className="flex min-h-[60px] min-w-0 flex-col items-center justify-center rounded-xl border border-[#F1F5F9] bg-[#F8FAFC] px-1.5 py-2 text-center">
+    <span className="w-full truncate text-[10px] font-semibold leading-tight text-[#64748B]">{etiqueta}</span>
+    <div className={`mt-1 w-full min-w-0 text-[14px] font-bold leading-tight tabular-nums text-[#0F172A] ${claseValor}`}>
+      {children}
+    </div>
+  </div>
+);
+
 export default function InspeccionModule({
   datosProceso,
   usuarioActual,
@@ -57,13 +76,16 @@ export default function InspeccionModule({
   // En colaborativo el número visible viene reservado por el servidor para este inspector.
   const numCajaInicial = isColaborativo ? (nextCajaColaborativa || 1) : (draftInit?.cajaActual?.numCaja || 1);
   const [cajaActual, setCajaActual] = useState(() => {
-    const base = draftInit?.cajaActual || { frutos: '100', calibre: '', brix: '', color: '', observacion: '', defCalidad: {}, defCondicion: {} };
-    return { ...base, observacion: base.observacion || '', numCaja: numCajaInicial };
+    const base = draftInit?.cajaActual || { frutos: '100', calibre: '', tempPulpa: '', brix: '', color: '', observacion: '', defCalidad: {}, defCondicion: {} };
+    return { ...base, tempPulpa: base.tempPulpa ?? '', observacion: base.observacion || '', numCaja: numCajaInicial };
   });
   const [horaInicio, setHoraInicio] = useState(draftInit?.horaInicio || horaInicioAsignada || null);
   const [tabDefectos, setTabDefectos] = useState('calidad');
   const [showModalFinalizar, setShowModalFinalizar] = useState(false);
   const [showModalCancelar, setShowModalCancelar] = useState(false);
+  const [confirmandoCancelacionTotal, setConfirmandoCancelacionTotal] = useState(false);
+  const [anulandoCaja, setAnulandoCaja] = useState(false);
+  const [cancelandoProceso, setCancelandoProceso] = useState(false);
   const [showModalExitoGuardado, setShowModalExitoGuardado] = useState(false);
   const [mensajeExito, setMensajeExito] = useState('');
   const [haVistoCondicion, setHaVistoCondicion] = useState(false);
@@ -91,6 +113,7 @@ export default function InspeccionModule({
     numCaja,
     frutos: '100',
     calibre: '',
+    tempPulpa: '',
     brix: '',
     color: '',
     observacion: '',
@@ -101,13 +124,10 @@ export default function InspeccionModule({
   const [cajaIndexEdicion, setCajaIndexEdicion] = useState(null);
   const [tabDefectosEdicion, setTabDefectosEdicion] = useState('calidad');
   const hideSpinners = "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
-  const headerCompleto = cajaActual.frutos !== '' && cajaActual.calibre !== '' && cajaActual.color !== '' && cajaActual.brix !== '';
+  const headerCompleto = cajaActual.frutos !== '' && cajaActual.calibre !== '' && leerTempPulpa(cajaActual.tempPulpa) !== null && cajaActual.color !== '' && cajaActual.brix !== '';
   const tieneDefectosCajaActual = [...Object.values(cajaActual.defCalidad || {}), ...Object.values(cajaActual.defCondicion || {})].some(v => (parseInt(v, 10) || 0) > 0);
-  const cajaActualTieneDatos = cajaActual.frutos !== '100' || cajaActual.calibre !== '' || cajaActual.brix !== '' || cajaActual.color !== '' || String(cajaActual.observacion || '').trim() !== '' || tieneDefectosCajaActual;
+  const cajaActualTieneDatos = cajaActual.frutos !== '100' || cajaActual.calibre !== '' || String(cajaActual.tempPulpa ?? '') !== '' || cajaActual.brix !== '' || cajaActual.color !== '' || String(cajaActual.observacion || '').trim() !== '' || tieneDefectosCajaActual;
   const requiereRevisionCondicion = cajaActualTieneDatos && !haVistoCondicion;
-  const API_URL = window.location.hostname.includes('goldanda.cl')
-    ? 'https://evap.maq.goldanda.cl'
-    : `http://${window.location.hostname || 'localhost'}:3001`;
   const obtenerSiguienteCajaServidor = async (preferredCaja = null) => {
     if (!isColaborativo || !procesoIdBD) return null;
     const extra = Number.isInteger(Number(preferredCaja)) && Number(preferredCaja) > 0 ? `&preferredCaja=${Number(preferredCaja)}` : '';
@@ -179,7 +199,13 @@ export default function InspeccionModule({
         if (res.ok) {
           setUsuariosEnInspeccion(Number(data.usuariosEnProceso || data.inspectoresActivos) || 1);
           if (Array.isArray(data.usuariosProceso)) setUsuariosProceso(data.usuariosProceso.length ? data.usuariosProceso : [{ username: usuarioActual?.username || datosProceso?.username || 'Usuario' }]);
-          setFotosProceso({ light: Boolean(data.fotoLight), dark: Boolean(data.fotoDark) });
+          // Las fotos solo se agregan/reemplazan: una respuesta de polling
+          // desactualizada no debe apagar una foto ya confirmada por el POST.
+          setFotosProceso(prev => {
+            const light = prev.light || Boolean(data.fotoLight);
+            const dark = prev.dark || Boolean(data.fotoDark);
+            return prev.light === light && prev.dark === dark ? prev : { light, dark };
+          });
           const totalServidor = Number(data.cajasGuardadas);
           if (Number.isInteger(totalServidor) && totalServidor >= 0 && totalServidor !== cajasGuardadasRef.current) {
             const detalleRes = await fetch(`${API_URL}/api/procesos/colaborativo/activo-detalle`, { cache: 'no-store' });
@@ -291,11 +317,18 @@ export default function InspeccionModule({
     if (esEdicion) setCajaEnEdicion(prev => ({ ...prev, brix: val }));
     else setCajaActual(prev => ({ ...prev, brix: val }));
   };
+  const manejarCambioTempPulpa = (e, esEdicion = false) => {
+    const valor = e.target.value;
+    if (!/^-?\d{0,4}(?:[.,]\d{0,2})?$/.test(valor)) return;
+    if (!esEdicion) registrarInicioProceso();
+    if (esEdicion) setCajaEnEdicion(prev => ({ ...prev, tempPulpa: valor }));
+    else setCajaActual(prev => ({ ...prev, tempPulpa: valor }));
+  };
   // 🔥 NUEVA LÓGICA DE GUARDADO EN TIEMPO REAL CAJA POR CAJA
   const guardarCaja = async () => {
-    if (procesoCerradoRemotamente) return;
+    if (procesoCerradoRemotamente || anulandoCaja || cancelandoProceso || guardandoCaja) return;
     if (!parametrosListos) return alert("Los parámetros de calificación aún no están disponibles.");
-    if (!headerCompleto) return alert("Completa Muestra, Calibre, Color de embalaje y °Brix.");
+    if (!headerCompleto) return alert("Completa Muestra, Calibre, Temp pulpa (°C), Color de embalaje y °Brix.");
     const brixVal = parseFloat(cajaActual.brix);
     if (!isNaN(brixVal) && brixVal > 30) { if (!window.confirm(`El valor de °Brix ingresado (${brixVal}) es superior a 30. ¿Estás seguro?`)) return; }
     registrarInicioProceso();
@@ -346,18 +379,28 @@ export default function InspeccionModule({
   const handleEdicionCampo = (campo, valor) => setCajaEnEdicion(prev => ({ ...prev, [campo]: valor }));
   const handleEdicionDefecto = (tipoDef, def, valor) => { const val = valor === '' ? '' : Math.max(0, parseInt(valor) || 0); setCajaEnEdicion(prev => ({ ...prev, [tipoDef]: { ...prev[tipoDef], [def]: val } })); };
   const guardarCambiosCajaEditada = async () => {
+    const valorEdicion = cajaEnEdicion.tempPulpa;
+    const tempPulpaEdicion = leerTempPulpa(valorEdicion);
+    if (valorEdicion != null && String(valorEdicion).trim() !== '' && tempPulpaEdicion === null) {
+      return alert('Temp pulpa debe ser un número válido en °C (hasta dos decimales).');
+    }
+    // No se obliga a completar retroactivamente registros anteriores a esta versión.
+    const tempAnterior = cajas[cajaIndexEdicion]?.tempPulpa;
+    if (tempAnterior != null && String(tempAnterior).trim() !== '' && tempPulpaEdicion === null) {
+      return alert('La caja ya tiene Temp pulpa registrada. Ingresa un valor antes de aplicar cambios.');
+    }
     const brixVal = parseFloat(cajaEnEdicion.brix);
     if (!isNaN(brixVal) && brixVal > 30) { if (!window.confirm(`El valor de °Brix (${brixVal}) es mayor a 30. ¿Es correcto?`)) return; }
-    let cajaActualizada = { ...cajaEnEdicion, observacion: String(cajaEnEdicion.observacion || '').slice(0, 60) };
+    let cajaActualizada = { ...cajaEnEdicion, tempPulpa: tempPulpaEdicion, observacion: String(cajaEnEdicion.observacion || '').slice(0, 60) };
     if (isColaborativo && cajaActualizada.id) {
       try {
         const res = await fetch(`${API_URL}/api/procesos/colaborativo/caja/${cajaActualizada.id}/observacion`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ observacion: cajaActualizada.observacion })
+          body: JSON.stringify({ observacion: cajaActualizada.observacion, tempPulpa: cajaActualizada.tempPulpa })
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return alert(data.error || 'No fue posible actualizar la observación de la caja.');
-        cajaActualizada = { ...cajaActualizada, observacion: data.observacion || '' };
+        cajaActualizada = { ...cajaActualizada, observacion: data.observacion || '', tempPulpa: data.tempPulpa ?? null };
       } catch (error) {
         console.error(error);
         return alert('No fue posible sincronizar la observación con el servidor.');
@@ -386,36 +429,75 @@ export default function InspeccionModule({
     setCajaEnEdicion(null); setCajaIndexEdicion(null);
     setMensajeExito('Caja eliminada correctamente.'); setTimeout(() => setMensajeExito(''), 2200);
   };
+  // Anula solo el formulario de caja sin guardar ni borrar registros de otras cajas.
+  // En modo colaborativo se libera la reserva temporal del inspector, no la sesión.
+  const anularCajaActual = async () => {
+    if (anulandoCaja || guardandoCaja || cancelandoProceso || procesoCerradoRemotamente) return;
+    setAnulandoCaja(true);
+    try {
+      let siguienteCaja = cajas.length + 1;
+      if (isColaborativo && procesoIdBD) {
+        const respuesta = await fetch(`${API_URL}/api/procesos/colaborativo/cancelar-caja`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ procesoId: procesoIdBD, clientId: liveClientIdRef.current })
+        });
+        const resultado = await respuesta.json().catch(() => ({}));
+        if (!respuesta.ok || resultado.success !== true) {
+          throw new Error(resultado.error || 'No se pudo liberar la caja en revisión.');
+        }
+        // Obtener una reserva nueva mantiene la inspección del usuario abierta.
+        // El servidor puede asignar nuevamente el mismo número: no se guarda ninguna caja anulada.
+        siguienteCaja = await obtenerSiguienteCajaServidor();
+      }
+      setCajaActual(crearCajaVacia(siguienteCaja));
+      setHaVistoCondicion(false);
+      setTabDefectos('calidad');
+      setConfirmandoCancelacionTotal(false);
+      setShowModalCancelar(false);
+      setMensajeExito('Caja en revisión anulada. Puedes continuar con una nueva caja.');
+      setTimeout(() => setMensajeExito(''), 3200);
+    } catch (error) {
+      console.error('Error anulando la caja actual:', error);
+      alert(error.message || 'No se pudo anular la caja. Tus datos ingresados siguen disponibles para reintentar.');
+    } finally {
+      setAnulandoCaja(false);
+    }
+  };
+
+  // Cancelar el proceso completo es una decisión distinta: cierra la inspección
+  // para todos los participantes y conserva las cajas ya guardadas como Cancelado.
   const confirmarCancelarProceso = async () => {
+    if (cancelandoProceso || guardandoCaja || anulandoCaja || procesoCerradoRemotamente) return;
+    setCancelandoProceso(true);
     try {
       if (isColaborativo && procesoIdBD) {
-        if (usuariosEnInspeccion > 1) {
-          const resAbandonar = await fetch(`${API_URL}/api/procesos/colaborativo/abandonar`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ procesoId: procesoIdBD, clientId: liveClientIdRef.current })
-          });
-          const dataAbandonar = await resAbandonar.json().catch(() => ({}));
-          if (!resAbandonar.ok) throw new Error(dataAbandonar.error || 'No se pudo abandonar la inspección.');
-        } else {
-          const resCancelar = await fetch(`${API_URL}/api/procesos/colaborativo/descartar`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ procesoId: procesoIdBD, clientId: liveClientIdRef.current, forzar: true })
-          });
-          const dataCancelar = await resCancelar.json().catch(() => ({}));
-          if (!resCancelar.ok) throw new Error(dataCancelar.error || 'No se pudo cancelar el proceso.');
+        const respuesta = await fetch(`${API_URL}/api/procesos/colaborativo/descartar`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ procesoId: procesoIdBD, clientId: liveClientIdRef.current, forzar: true })
+        });
+        const resultado = await respuesta.json().catch(() => ({}));
+        if (!respuesta.ok || resultado.success !== true) {
+          throw new Error(resultado.error || 'No se pudo cancelar el proceso completo.');
         }
-      } else {
-        await fetch(`${API_URL}/api/live`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
       }
-    } catch (err) {
-      console.error('Error al salir de inspección colaborativa:', err);
-      alert(err.message || 'No se pudo cancelar la inspección.');
-      return;
+      await fetch(`${API_URL}/api/live`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clearClientId: liveClientIdRef.current })
+      }).catch(() => {});
+      limpiarBorrador();
+      limpiarClientePersistente();
+      localStorage.removeItem('inspeccionActiva');
+      setConfirmandoCancelacionTotal(false);
+      setShowModalCancelar(false);
+      if (onVolver) onVolver();
+    } catch (error) {
+      console.error('Error cancelando proceso completo:', error);
+      alert(error.message || 'No fue posible cancelar el proceso. La inspección continúa abierta.');
+    } finally {
+      setCancelandoProceso(false);
     }
-    limpiarBorrador(); limpiarClientePersistente();
-    localStorage.removeItem('inspeccionActiva');
-    setShowModalCancelar(false);
-    if (onVolver) onVolver();
   };
   const abandonarInspeccion = async () => {
     if (!isColaborativo || !procesoIdBD || usuariosEnInspeccion <= 1 || abandonando) return;
@@ -516,6 +598,9 @@ export default function InspeccionModule({
   const totalDefCalidadActual = sumarDefectos(cajaActual.defCalidad, nombresCalidad);
   const totalDefCondicionActual = sumarDefectos(cajaActual.defCondicion, nombresCondicion);
   const abrirModalFinalizar = async () => {
+    if (cajaActualTieneDatos && !headerCompleto) {
+      return alert('La caja actual está incompleta. Completa Muestra, Calibre, Temp pulpa (°C), Color y °Brix antes de finalizar.');
+    }
     if (requiereRevisionCondicion) { setTabDefectos('condicion'); return; }
     if (isColaborativo && procesoIdBD) {
       try {
@@ -523,7 +608,11 @@ export default function InspeccionModule({
         const data = await res.json().catch(() => ({}));
         if (res.status === 404 || (res.ok && data.estado !== 'En curso')) return marcarProcesoCerradoRemotamente(data.estado || 'Finalizado');
         const estadoFotos = { light: Boolean(data.fotoLight), dark: Boolean(data.fotoDark) };
-        setFotosProceso(estadoFotos);
+        setFotosProceso(prev => {
+          const light = prev.light || estadoFotos.light;
+          const dark = prev.dark || estadoFotos.dark;
+          return prev.light === light && prev.dark === dark ? prev : { light, dark };
+        });
         setUsuariosEnInspeccion(Number(data.inspectoresActivos) || 1);
         setOtrosInspectoresFinalizacion(Number(data.otrosInspectoresActivos) || 0);
         if (!estadoFotos.light || !estadoFotos.dark) return alert('Debes ingresar las fotografías de embalaje Light y Dark antes de finalizar el proceso.');
@@ -538,6 +627,7 @@ export default function InspeccionModule({
   const enviarInspeccionAlServidor = async (forzarConfirmado = false) => {
     if (procesoCerradoRemotamente) return;
     if (!parametrosListos) return alert("No se puede finalizar sin los parámetros de calificación.");
+    if (cajaActualTieneDatos && !headerCompleto) return alert('Completa Temp pulpa (°C) y los otros datos de la caja actual antes de finalizar.');
     if (!fotosCompletas) return alert('Debes ingresar las fotografías de embalaje Light y Dark antes de finalizar el proceso.');
     if (requiereRevisionCondicion) {
       setTabDefectos('condicion');
@@ -759,21 +849,59 @@ export default function InspeccionModule({
           </div>
           <img src="/Logo_goldanda.png" alt="Logo" className="h-7 md:h-10 object-contain hidden sm:block" />
         </div>
-        {/* 1. TARJETA: ACUMULADO DE PROCESO */}
-        <div className="bg-[#ffffff] rounded-2xl border-t-4 border-[#ea580c] border-x border-b border-[#e2e8f0] shadow-sm px-4 md:px-6 py-3.5 mb-3 shrink-0 w-full transition-all animate-fade-in-up delay-2">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2 md:mb-3">
-            <h2 className="text-[11px] md:text-xs font-bold text-[#94a3b8] tracking-wider uppercase">Acumulado de Proceso</h2>
-            <FotografiasProceso
-              apiUrl={API_URL}
-              procesoId={isColaborativo ? procesoIdBD : null}
-              lightOk={isColaborativo ? fotosProceso.light : Boolean(fotoLightLocal)}
-              darkOk={isColaborativo ? fotosProceso.dark : Boolean(fotoDarkLocal)}
-              disabled={Boolean(procesoCerradoRemotamente)}
-              onEstadoChange={setFotosProceso}
-              onLocalPhoto={(tipo, imagen) => tipo === 'light' ? setFotoLightLocal(imagen) : setFotoDarkLocal(imagen)}
-            />
+        {/* 1. TARJETA: ACUMULADO DE PROCESO. En móvil: diseño compacto 3 / 3 / 2. */}
+        <div className="mx-auto mb-3 w-full max-w-sm shrink-0 rounded-[24px] border-[1.5px] border-[#F97316] bg-white p-3.5 shadow-sm transition-all animate-fade-in-up delay-2 md:max-w-none md:rounded-2xl md:border md:border-t-4 md:border-x-[#e2e8f0] md:border-b-[#e2e8f0] md:border-t-[#ea580c] md:px-6 md:py-3.5">
+          <div className="mb-3 flex flex-col justify-between gap-2 md:mb-3 md:flex-row md:items-center">
+            <h2 className="hidden text-[11px] font-bold uppercase tracking-wider text-[#94a3b8] md:block md:text-xs">Acumulado de Proceso</h2>
+            <div className="w-full rounded-2xl border border-[#F1F5F9] bg-[#F8FAFC] px-2.5 py-2.5 md:w-auto md:rounded-none md:border-0 md:bg-transparent md:p-0">
+              <FotografiasProceso
+                apiUrl={API_URL}
+                procesoId={isColaborativo ? procesoIdBD : null}
+                lightOk={isColaborativo ? fotosProceso.light : Boolean(fotoLightLocal)}
+                darkOk={isColaborativo ? fotosProceso.dark : Boolean(fotoDarkLocal)}
+                disabled={Boolean(procesoCerradoRemotamente)}
+                compacto
+                onEstadoChange={setFotosProceso}
+                onLocalPhoto={(tipo, imagen) => tipo === 'light' ? setFotoLightLocal(imagen) : setFotoDarkLocal(imagen)}
+              />
+            </div>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-y-3 md:gap-y-4 gap-x-2 text-[#0f172a]">
+
+          {/* Etiqueta centrada sobre divisor, solo visible en móvil. */}
+          <div className="mb-3 flex items-center gap-2 md:hidden" aria-label="Acumulado de proceso móvil">
+            <span className="h-px flex-1 bg-slate-200 md:hidden" />
+            <h2 className="shrink-0 text-center text-[11px] font-bold uppercase tracking-[0.06em] text-[#475569] md:hidden">Acumulado de Proceso</h2>
+            <span className="h-px flex-1 bg-slate-200 md:hidden" />
+          </div>
+
+          {/* Móvil: alturas fijas y alineación uniforme, sin alterar datos. */}
+          <div className="space-y-2 md:hidden">
+            <div className="grid grid-cols-3 gap-2">
+              <MetricaAcumuladaMovil etiqueta="Proceso">{numProceso || '-'}</MetricaAcumuladaMovil>
+              <MetricaAcumuladaMovil etiqueta="Cajas analizadas">{totalCajasBanner}</MetricaAcumuladaMovil>
+              <MetricaAcumuladaMovil etiqueta="Sólidos (L/D)" claseValor="whitespace-nowrap text-[12px] sm:text-[14px]">
+                {promLight} <span className="font-normal text-slate-400">/</span> {promDark}
+              </MetricaAcumuladaMovil>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <MetricaAcumuladaMovil etiqueta="Exportable" claseValor="text-[#059669]">
+                {acumuladoFrutos ? pExpGlobal.toFixed(1) : '100.0'}%
+              </MetricaAcumuladaMovil>
+              <MetricaAcumuladaMovil etiqueta="Def. calidad">{acumuladoFrutos ? pCalGlobal.toFixed(1) : '0.0'}%</MetricaAcumuladaMovil>
+              <MetricaAcumuladaMovil etiqueta="Def. condición">{acumuladoFrutos ? pCondGlobal.toFixed(1) : '0.0'}%</MetricaAcumuladaMovil>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <MetricaAcumuladaMovil etiqueta="Calificación">{notaGlobal}</MetricaAcumuladaMovil>
+              <MetricaAcumuladaMovil etiqueta="Estado">
+                <span className={`inline-flex max-w-full items-center justify-center rounded-full border px-2 py-0.5 text-[11px] font-bold ${colorNota}`}>
+                  {estadoGlobal}
+                </span>
+              </MetricaAcumuladaMovil>
+            </div>
+          </div>
+
+          {/* Escritorio: conserva la disposición y dimensiones originales. */}
+          <div className="hidden md:grid md:grid-cols-4 lg:grid-cols-8 gap-y-3 md:gap-y-4 gap-x-2 text-[#0f172a]">
             <div className="flex flex-col border-r border-[#e2e8f0] pr-1 md:pr-2">
               <span className="text-[11px] font-semibold text-[#64748b] mb-0.5">Proceso</span>
               <span className="text-base md:text-[22px] font-black">{numProceso || '-'}</span>
@@ -830,7 +958,7 @@ export default function InspeccionModule({
                 <option value="" disabled>Seleccionar caja...</option>
                 {cajas.map((c, idx) => (
                   <option key={idx} value={idx}>
-                    Caja {idx + 1} - {c.calibre || 'Sin Calibre'} ({c.frutos} fr. - {c.brix ? `${c.brix}°Bx` : 'Sin Bx'})
+                    Caja {idx + 1} - {c.calibre || 'Sin Calibre'} ({c.frutos} fr. - {c.tempPulpa == null || c.tempPulpa === '' ? 'Sin Temp pulpa' : `${String(c.tempPulpa).replace('.', ',')}°C`} - {c.brix ? `${c.brix}°Bx` : 'Sin Bx'})
                   </option>
                 ))}
               </select>
@@ -840,18 +968,27 @@ export default function InspeccionModule({
         {/* 2. TARJETA: EVALUANDO NUEVA CAJA */}
         <div className="bg-[#ffffff] border border-[#e2e8f0] rounded-2xl p-4 md:px-6 md:py-4 shadow-sm w-full relative mb-3 animate-fade-in-up delay-3">
           {cajaEnEdicion && <div className="absolute inset-0 bg-white/70 backdrop-blur-[2px] z-10 rounded-2xl"></div>}
-          <div className="flex items-center justify-between mb-3 border-b border-[#f1f5f9] pb-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3 border-b border-[#f1f5f9] pb-3">
             <span className="text-[#1e293b] font-semibold text-sm md:text-lg tracking-tight">
               Evaluando nueva caja {isColaborativo ? <span className="text-[#64748b] text-xs md:text-sm font-bold ml-2">(el orden se asigna al guardar)</span> : <span className="text-[#ea580c] text-lg md:text-xl font-bold ml-1">#{cajaActual.numCaja}</span>}
             </span>
-            <div className="flex items-center gap-2 md:gap-3 text-[11px] md:text-sm font-semibold">
+            <div className="flex flex-wrap items-center gap-1.5 md:gap-3 text-[11px] md:text-sm font-semibold">
+              <button
+                type="button"
+                onClick={() => { setConfirmandoCancelacionTotal(false); setShowModalCancelar(true); }}
+                disabled={cajaEnEdicion !== null || guardandoCaja || anulandoCaja || cancelandoProceso || Boolean(procesoCerradoRemotamente)}
+                title="Anular la caja sin guardar sus datos"
+                className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-700 transition-colors hover:bg-amber-100 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <X className="h-3.5 w-3.5" /> Anular caja
+              </button>
               <span className="text-[#64748b] hidden sm:inline">Rendimiento:</span>
               <span className="bg-[#ffedd5] text-[#ea580c] px-2 py-1 md:px-3 rounded-lg border border-[#fed7aa]">Cal: {rend.cal}%</span>
               <span className="bg-[#ffe4e6] text-[#e11d48] px-2 py-1 md:px-3 rounded-lg border border-[#fecaca]">Cond: {rend.cond}%</span>
               <span className="bg-[#ecfdf5] text-[#059669] px-2 py-1 md:px-3 rounded-lg border border-[#a7f3d0]">Exp: {rend.exp}%</span>
             </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3 md:gap-4">
             <div className="flex items-center justify-between">
               <span className="text-[13px] font-medium text-[#475569]">Muestra (frutos):</span>
               <input
@@ -871,6 +1008,18 @@ export default function InspeccionModule({
                 <option value="L">L</option><option value="XL">XL</option><option value="J">J</option>
                 <option value="2J">2J</option><option value="3J">3J</option><option value="4J">4J</option><option value="5J">5J</option>
               </select>
+            </div>
+            <div className="flex items-center justify-between">
+              <label htmlFor="temp-pulpa-caja" className="text-[13px] font-medium text-[#475569]">Temp pulpa:</label>
+              <div className="relative">
+                <input id="temp-pulpa-caja" type="text" inputMode="decimal" maxLength={8}
+                  placeholder="0,0" value={cajaActual.tempPulpa ?? ''}
+                  onChange={(e) => manejarCambioTempPulpa(e)}
+                  aria-label="Temperatura de pulpa en grados Celsius por caja"
+                  className="w-28 h-9 rounded-lg border border-[#e2e8f0] bg-white px-2 pr-8 text-center text-sm font-semibold text-[#0f172a] outline-none transition-all focus:border-[#ea580c] focus:ring-2 focus:ring-[#ffedd5]"
+                />
+                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] font-semibold text-slate-400 pointer-events-none">°C</span>
+              </div>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-[13px] font-medium text-[#475569]">Color embalaje:</span>
@@ -920,7 +1069,7 @@ export default function InspeccionModule({
           )}
           {parametrosListos && !headerCompleto && (
             <p className="text-center text-[12px] md:text-sm text-[#ea580c] font-medium my-4 py-2 bg-[#ffedd5] rounded-lg">
-              Completa Muestra, Calibre, Color y °Brix en la sección superior para ingresar los defectos.
+              Completa Muestra, Calibre, Temp pulpa (°C), Color y °Brix para ingresar los defectos.
             </p>
           )}
           {parametrosListos && tabDefectos === 'calidad' && (
@@ -977,16 +1126,16 @@ export default function InspeccionModule({
         </div>
         {/* 4. BOTONES DE ACCIÓN */}
         <div className="pt-2 pb-6 md:pb-12 flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3 w-full animate-fade-in-up delay-4">
-          <button onClick={() => setShowModalCancelar(true)} disabled={cajaEnEdicion !== null || guardandoCaja} className={`btn-cancel group ${cajaEnEdicion !== null || guardandoCaja ? 'btn-disabled' : ''}`}>
+          <button onClick={() => { setConfirmandoCancelacionTotal(false); setShowModalCancelar(true); }} disabled={cajaEnEdicion !== null || guardandoCaja || anulandoCaja || cancelandoProceso || Boolean(procesoCerradoRemotamente)} className={`btn-cancel group ${cajaEnEdicion !== null || guardandoCaja || anulandoCaja || cancelandoProceso || procesoCerradoRemotamente ? 'btn-disabled' : ''}`}>
             <ArrowLeft className="w-4 h-4 transition-transform duration-200 group-hover:-translate-x-1" />
-            <span>Cancelar</span>
+            <span>Cancelar / Anular</span>
           </button>
           {isColaborativo && usuariosEnInspeccion > 1 && (
             <button onClick={abandonarInspeccion} disabled={cajaEnEdicion !== null || guardandoCaja || abandonando} className={`inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl border border-[#cbd5e1] bg-white text-[#475569] font-semibold text-sm hover:bg-[#f8fafc] hover:text-[#0f172a] transition-all ${cajaEnEdicion !== null || guardandoCaja || abandonando ? 'opacity-50 pointer-events-none' : ''}`}>
               <LogOut className="w-4 h-4" /> {abandonando ? 'Abandonando...' : 'Abandonar inspección'}
             </button>
           )}
-          <button onClick={guardarCaja} disabled={!headerCompleto || !parametrosListos || cajaEnEdicion !== null || !haVistoCondicion || guardandoCaja} className={`btn-primary group ${(!headerCompleto || !parametrosListos || cajaEnEdicion !== null || !haVistoCondicion || guardandoCaja) ? 'btn-disabled' : ''}`}>
+          <button onClick={guardarCaja} disabled={!headerCompleto || !parametrosListos || cajaEnEdicion !== null || !haVistoCondicion || guardandoCaja || anulandoCaja || cancelandoProceso} className={`btn-primary group ${(!headerCompleto || !parametrosListos || cajaEnEdicion !== null || !haVistoCondicion || guardandoCaja || anulandoCaja || cancelandoProceso) ? 'btn-disabled' : ''}`}>
             {guardandoCaja ? (
               <span className="flex items-center gap-2">
                 <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
@@ -996,7 +1145,7 @@ export default function InspeccionModule({
               <span>{(!haVistoCondicion && headerCompleto && cajaEnEdicion === null) ? 'Revisa Condición para Guardar' : 'Guardar y Siguiente'}</span>
             )}
           </button>
-          <button onClick={abrirModalFinalizar} disabled={cajaEnEdicion !== null || guardandoCaja || !parametrosListos || requiereRevisionCondicion || !fotosCompletas || procesoCerradoRemotamente} className={`btn-success group shrink-0 ${cajaEnEdicion !== null || guardandoCaja || !parametrosListos || requiereRevisionCondicion || !fotosCompletas || procesoCerradoRemotamente ? 'btn-disabled' : ''}`}>
+          <button onClick={abrirModalFinalizar} disabled={cajaEnEdicion !== null || guardandoCaja || anulandoCaja || cancelandoProceso || !parametrosListos || requiereRevisionCondicion || !fotosCompletas || procesoCerradoRemotamente} className={`btn-success group shrink-0 ${cajaEnEdicion !== null || guardandoCaja || anulandoCaja || cancelandoProceso || !parametrosListos || requiereRevisionCondicion || !fotosCompletas || procesoCerradoRemotamente ? 'btn-disabled' : ''}`}>
             <Check className="w-4 h-4 transition-transform duration-200 group-hover:scale-110" />
             <span>{!fotosCompletas ? 'Faltan fotografías' : requiereRevisionCondicion ? 'Revisa Condición para Finalizar' : 'Finalizar Proceso'}</span>
           </button>
@@ -1010,11 +1159,17 @@ export default function InspeccionModule({
               <h3 className="font-black text-[#0f172a] text-base md:text-xl tracking-tight">Corrigiendo Caja {Number(cajaIndexEdicion) + 1}</h3>
               <button onClick={() => setCajaEnEdicion(null)} className="p-1.5 rounded-lg bg-[#f1f5f9] hover:bg-[#e2e8f0] text-[#64748b] hover:text-[#0f172a] transition-colors"><X className="w-5 h-5" /></button>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 border-b border-[#f1f5f9]">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 p-4 border-b border-[#f1f5f9]">
               <div><label className="text-xs font-semibold text-[#475569] block mb-1">Muestra (frutos)</label><input type="number" value={cajaEnEdicion.frutos ?? ''} onChange={(e) => handleEdicionCampo('frutos', e.target.value)} className="w-full h-9 text-center font-semibold text-sm bg-white border border-[#cbd5e1] rounded-lg outline-none focus:border-[#ea580c] transition-colors" /></div>
               <div>
                 <label className="text-xs font-semibold text-[#475569] block mb-1">Calibre</label>
                 <select value={cajaEnEdicion.calibre ?? ''} onChange={(e) => handleEdicionCampo('calibre', e.target.value)} className="w-full h-9 text-center font-semibold text-sm bg-white border border-[#cbd5e1] rounded-lg outline-none focus:border-[#ea580c] transition-colors"><option value="">Seleccionar</option><option value="L">L</option><option value="XL">XL</option><option value="J">J</option><option value="2J">2J</option><option value="3J">3J</option><option value="4J">4J</option><option value="5J">5J</option></select>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-[#475569] block mb-1">Temp pulpa (°C)</label>
+                <input type="text" inputMode="decimal" maxLength={8} placeholder="Ej. 2,5"
+                  value={cajaEnEdicion.tempPulpa ?? ''} onChange={(e) => manejarCambioTempPulpa(e, true)}
+                  className="w-full h-9 rounded-lg border border-[#cbd5e1] bg-white px-2 text-center text-sm font-semibold outline-none focus:border-[#ea580c]" />
               </div>
               <div>
                 <label className="text-xs font-semibold text-[#475569] block mb-1">Color</label>
@@ -1054,17 +1209,45 @@ export default function InspeccionModule({
         </div>
       )}
       {showModalCancelar && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0f172a]/60 backdrop-blur-sm p-4 animate-fade-in-up">
-          <div className="bg-[#ffffff] rounded-2xl shadow-[0_20px_25px_-5px_rgba(0,0,0,0.1)] w-full max-w-md p-6 md:p-8 border border-[#e2e8f0]">
-            <div className="flex flex-col items-center text-center">
-              <div className="w-14 h-14 bg-[#fef2f2] text-[#e11d48] rounded-full flex items-center justify-center mb-5"><AlertTriangle className="w-7 h-7" /></div>
-              <h3 className="text-xl font-bold text-[#0f172a] mb-2">Cancelar Inspección</h3>
-              <p className="text-[#64748b] mb-8 text-sm leading-relaxed">{isColaborativo ? usuariosEnInspeccion > 1 ? <>La caja actual no se guardará y abandonarás esta inspección. El proceso <span className="font-bold text-[#0f172a]">continuará activo</span> para los demás usuarios.</> : <>La caja actual no se guardará. Si existen cajas guardadas, se conservarán en el historial y el proceso quedará <span className="font-bold text-[#e11d48]">Cancelado</span>. Si todavía está vacío, se eliminará automáticamente. En ambos casos podrás iniciar una nueva inspección.</> : <>¿Estás seguro de cancelar la inspección y volver al menú principal? Los datos de esta caja <span className="font-bold text-[#0f172a]">no se guardarán</span>.</>}</p>
-              <div className="flex gap-3 w-full">
-                <button onClick={() => setShowModalCancelar(false)} className="flex-1 py-2.5 rounded-lg border border-[#e2e8f0] text-[#334155] font-semibold hover:bg-[#f8fafc] text-sm transition-colors">Continuar editando</button>
-                <button onClick={confirmarCancelarProceso} className="flex-1 py-2.5 rounded-lg bg-[#e11d48] hover:bg-[#be123c] text-white font-semibold shadow-sm text-sm transition-colors">Sí, salir</button>
-              </div>
-            </div>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-[#0f172a]/60 backdrop-blur-sm p-4 animate-fade-in-up">
+          <div role="dialog" aria-modal="true" aria-labelledby="titulo-opciones-cancelacion" className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-7">
+            {confirmandoCancelacionTotal ? (
+              <>
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-red-200 bg-red-50 text-red-600"><AlertTriangle className="h-6 w-6" /></div>
+                <h3 id="titulo-opciones-cancelacion" className="text-lg font-extrabold text-slate-900">Confirmar cancelación del proceso</h3>
+                <p className="mt-2 text-[13px] leading-5 text-slate-600">
+                  Se cancelará por completo el proceso <strong>N° {numProceso}</strong>. {isColaborativo ? 'Las cajas ya guardadas se conservarán en el historial con estado Cancelado.' : 'Se descartarán los datos locales de esta inspección.'} La caja sin guardar se perderá.
+                </p>
+                {isColaborativo && usuariosEnInspeccion > 1 && (
+                  <p className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2.5 text-[12px] font-medium leading-5 text-red-700">
+                    <strong>Atención:</strong> hay otros inspectores conectados. Esta acción cerrará el proceso también para ellos e impedirá guardar sus cajas pendientes.
+                  </p>
+                )}
+                <div className="mt-5 grid grid-cols-2 gap-2">
+                  <button type="button" disabled={cancelandoProceso} onClick={() => setConfirmandoCancelacionTotal(false)} className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Volver</button>
+                  <button type="button" disabled={cancelandoProceso} onClick={confirmarCancelarProceso} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-red-600 px-3 text-xs font-bold text-white hover:bg-red-700 disabled:opacity-60">
+                    <Trash2 className="h-4 w-4" /> {cancelandoProceso ? 'Cancelando...' : 'Sí, cancelar proceso'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl border border-amber-200 bg-amber-50 text-amber-600"><AlertTriangle className="h-6 w-6" /></div>
+                <h3 id="titulo-opciones-cancelacion" className="text-lg font-extrabold text-slate-900">¿Qué deseas cancelar?</h3>
+                <p className="mt-1.5 text-[13px] leading-5 text-slate-500">Elige si deseas descartar solamente la caja que estás revisando o cerrar todo el proceso.</p>
+                <div className="mt-5 space-y-2">
+                  <button type="button" onClick={anularCajaActual} disabled={anulandoCaja || cancelandoProceso || guardandoCaja} className="flex w-full items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-3.5 text-left transition-all hover:border-amber-300 hover:bg-amber-100 active:scale-[0.99] disabled:opacity-60">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-amber-600"><X className="h-5 w-5" /></span>
+                    <span className="flex-1"><span className="block text-[13px] font-bold text-slate-900">{anulandoCaja ? 'Anulando caja...' : 'Anular solo esta caja'}</span><span className="mt-0.5 block text-[11px] leading-4 text-slate-600">Descarta sus datos sin salir de la inspección. No afecta las cajas guardadas.</span></span>
+                  </button>
+                  <button type="button" onClick={() => setConfirmandoCancelacionTotal(true)} disabled={anulandoCaja || cancelandoProceso || guardandoCaja} className="flex w-full items-center gap-3 rounded-xl border border-red-200 bg-white px-3.5 py-3.5 text-left transition-all hover:border-red-300 hover:bg-red-50 active:scale-[0.99] disabled:opacity-60">
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-50 text-red-600"><Trash2 className="h-5 w-5" /></span>
+                    <span className="flex-1"><span className="block text-[13px] font-bold text-red-700">Cancelar todo el proceso</span><span className="mt-0.5 block text-[11px] leading-4 text-slate-600">Cierra la inspección para todos los usuarios. Requiere confirmación adicional.</span></span>
+                  </button>
+                </div>
+                <button type="button" onClick={() => setShowModalCancelar(false)} disabled={anulandoCaja || cancelandoProceso} className="mt-4 h-10 w-full rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50">Seguir evaluando esta caja</button>
+              </>
+            )}
           </div>
         </div>
       )}

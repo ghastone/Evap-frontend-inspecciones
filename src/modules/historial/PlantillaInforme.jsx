@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 
 import { BarChart, Bar, XAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
+import { API_URL } from '../../config/api.js';
 
 const STOPWORDS_OBS=new Set(['de','del','la','las','el','los','un','una','unos','unas','en','con','por','para','y','o','a','al','se','que','muy','caja','cajas','fruta','presenta','presentan','observa','observan','aprecia','aprecian','detecta','detectan']);
 const normalizarObs=texto=>String(texto||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9ñ\s]/gi,' ').replace(/\s+/g,' ').trim();
@@ -12,9 +13,6 @@ const analizarObservaciones=cajas=>{const registros=(Array.isArray(cajas)?cajas:
 
 const SUM_CALIDAD = 'Sumatoria de calidad';
 const SUM_CONDICION = 'Sumatoria de condición';
-const API_URL = window.location.hostname.includes('goldanda.cl')
-  ? 'https://evap.maq.goldanda.cl'
-  : `http://${window.location.hostname || 'localhost'}:3001`;
 
 const numeroParametro = valor => {
   const n = Number(String(valor ?? '').replace(',', '.'));
@@ -162,6 +160,37 @@ const DefectoBar = ({ label, value, type }) => {
 
 };
 
+// Marco fotográfico reutilizable: las dos imágenes ocupan el MISMO espacio,
+// sin deformarse ni modificar la altura del informe/PDF.
+// La foto ya sale encuadrada desde FotografiasProceso: zoom=1 evita recortarla
+// otra vez. Las props posicion/zoom permiten ajustes de presentación si se
+// importa una imagen antigua que no pasó por el editor.
+const FotoInforme = ({ titulo, src, posicion = '50% 50%', zoom = 1 }) => (
+  <div className="bg-white border border-slate-200 rounded-xl p-2.5 flex-1 h-full min-h-0 shadow-sm flex flex-col overflow-hidden">
+    <h3 className="text-[11px] font-black text-slate-800 mb-1.5 shrink-0">{titulo}</h3>
+    <div className="relative w-full h-[246px] shrink-0 border border-slate-200 rounded-xl overflow-hidden bg-slate-50/50 flex items-center justify-center text-slate-400">
+      {src ? (
+        <img
+          src={src}
+          alt={titulo}
+          decoding="sync"
+          className="absolute inset-0 block w-full h-full object-cover"
+          style={{ objectFit: 'cover', objectPosition: posicion, transform: zoom === 1 ? undefined : `scale(${zoom})`, transformOrigin: 'center center', imageRendering: 'auto' }}
+        />
+      ) : (
+        <div className="flex flex-col items-center justify-center">
+          <svg className="w-8 h-8 mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <rect width="18" height="18" x="3" y="3" rx="2" ry="2" strokeWidth="2" />
+            <circle cx="8.5" cy="8.5" r="1.5" strokeWidth="2" />
+            <path d="m21 15-5-5L5 21" strokeWidth="2" />
+          </svg>
+          <span className="text-[10px] font-bold">Sin imagen</span>
+        </div>
+      )}
+    </div>
+  </div>
+);
+
 // ================= PLANTILLA PRINCIPAL =================
 
 const PlantillaInforme = React.forwardRef(({ datos, parametros: parametrosProp }, ref) => {
@@ -194,7 +223,10 @@ const PlantillaInforme = React.forwardRef(({ datos, parametros: parametrosProp }
 
   const exportadora = datos.exportadora || '-';
 
-  const planta = datos.planta || 'Maquehua';
+  // El historial entrega la identidad verificada antes de montar el informe.
+  // No se deduce Maquehua en localhost ni se elige una planta por defecto.
+  const planta = [datos.planta, datos.plantaNombre]
+    .find(valor => typeof valor === 'string' && valor.trim())?.trim() || 'Sin identificar';
 
   const csg = datos.csg || '-';
 
@@ -514,11 +546,12 @@ const PlantillaInforme = React.forwardRef(({ datos, parametros: parametrosProp }
 
       {/* 2. RESUMEN DE CALIDAD E IMÁGENES */}
 
-      <div className="flex gap-3 mb-2 shrink-0 items-stretch">
+      {/* Altura controlada: las fotos verticales no pueden desplazar el pie del PDF. */}
+      <div className="flex h-[292px] min-h-0 gap-3 mb-2 shrink-0 items-stretch">
 
         {/* Lado Izquierdo: Resumen general */}
 
-        <div className="bg-white border border-slate-200 rounded-xl p-2.5 w-[40%] shadow-sm flex flex-col justify-between">
+        <div className="bg-white border border-slate-200 rounded-xl p-2.5 w-[40%] h-full min-h-0 shadow-sm flex flex-col justify-between">
 
           <TituloModulo numero="2" titulo="Resumen general" width="w-[120px]" />
 
@@ -562,7 +595,7 @@ const PlantillaInforme = React.forwardRef(({ datos, parametros: parametrosProp }
 
           <div className="flex justify-around items-center flex-1 divide-x divide-slate-100">
 
-            <Donut percentage={pExp} color={pExp >= 90 ? "#00A859" : "#ef4444"} label="Exportable" pillColor={pExp >= 90 ? "#86efac" : "#fca5a5"} />
+            <Donut percentage={pExp} color="#00A859" label="Exportable" pillColor="#86efac" />
 
             <Donut percentage={pCal} color="#f97316" label="Calidad" pillColor="#fdba74" />
 
@@ -572,50 +605,11 @@ const PlantillaInforme = React.forwardRef(({ datos, parametros: parametrosProp }
 
         </div>
 
-        {/* Lado Derecho: Imágenes */}
-
-        <div className="flex gap-3 w-[60%] justify-center">
-
-          <div className="bg-white border border-slate-200 rounded-xl p-2.5 flex-1 shadow-sm flex flex-col">
-
-            <h3 className="text-[11px] font-black text-slate-800 mb-1.5 shrink-0">Embalaje Light</h3>
-
-            <div className="flex-1 w-full border border-slate-200 rounded-xl overflow-hidden flex items-center justify-center text-slate-400 bg-slate-50/50 min-h-[275px]">
-              {fotoLight ? (
-                <img src={fotoLight} alt="Embalaje Light" decoding="sync" className="w-full h-full min-h-[275px] object-contain" style={{ imageRendering: 'auto' }} />
-              ) : (
-                <div className="flex flex-col items-center justify-center">
-                  <svg className="w-8 h-8 mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <rect width="18" height="18" x="3" y="3" rx="2" ry="2" strokeWidth="2"/><circle cx="8.5" cy="8.5" r="1.5" strokeWidth="2"/><path d="m21 15-5-5L5 21" strokeWidth="2"/>
-                  </svg>
-                  <span className="text-[10px] font-bold">Sin imagen</span>
-                </div>
-              )}
-            </div>
-
-          </div>
-
-          <div className="bg-white border border-slate-200 rounded-xl p-2.5 flex-1 shadow-sm flex flex-col">
-
-            <h3 className="text-[11px] font-black text-slate-800 mb-1.5 shrink-0">Embalaje Dark</h3>
-
-            <div className="flex-1 w-full border border-slate-200 rounded-xl overflow-hidden flex items-center justify-center text-slate-400 bg-slate-50/50 min-h-[275px]">
-              {fotoDark ? (
-                <img src={fotoDark} alt="Embalaje Dark" decoding="sync" className="w-full h-full min-h-[275px] object-contain" style={{ imageRendering: 'auto' }} />
-              ) : (
-                <div className="flex flex-col items-center justify-center">
-                  <svg className="w-8 h-8 mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <rect width="18" height="18" x="3" y="3" rx="2" ry="2" strokeWidth="2"/><circle cx="8.5" cy="8.5" r="1.5" strokeWidth="2"/><path d="m21 15-5-5L5 21" strokeWidth="2"/>
-                  </svg>
-                  <span className="text-[10px] font-bold">Sin imagen</span>
-                </div>
-              )}
-            </div>
-
-          </div>
-
+        {/* Lado Derecho: marcos fotográficos de tamaño controlado. */}
+        <div className="flex gap-3 w-[60%] h-full min-h-0 justify-center">
+          <FotoInforme titulo="Embalaje Light" src={fotoLight} />
+          <FotoInforme titulo="Embalaje Dark" src={fotoDark} />
         </div>
-
       </div>
 
       {/* 3. DEFECTOS DE CALIDAD */}

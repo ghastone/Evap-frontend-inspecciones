@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { API_URL } from './config/api.js';
 import Login from './modules/dashboardLive/Login';
 import DashboardLiveView from './modules/dashboardLive/DashboardLiveView';
 import DashboardResumenDiario from './modules/dashboard/DashboardResumenDiario';
@@ -46,6 +47,9 @@ export default function App() {
   const [currentView, setCurrentView] = useState(() => {
     return localStorage.getItem('qc_current_view') || 'home';
   });
+  // Historial de procesos y Control Temperatura ocupan todo el ancho móvil.
+  // El sidebar original solo se muestra al pulsar el botón miniatura del módulo.
+  const ocultarSidebarEnMovil = ['digitacion-temperatura', 'historial'].includes(currentView);
   useEffect(()=>{
     if(!user)return;
     const noPermitida=(currentView==='nuevo-proceso'&&!puedeCrearProceso)||(currentView==='historial'&&!puedeVerHistorial)||(currentView.startsWith('dashboard_')&&!puedeVerDashboard)||(currentView==='digitacion-temperatura'&&!puedeDigitacion)||(currentView.startsWith('ajustes-')&&!puedeGestionarAjustes);
@@ -68,72 +72,17 @@ export default function App() {
   const [showAjustes, setShowAjustes] = useState(false);
   const [dashboardsAbierto, setDashboardsAbierto] = useState(true);
   const [showDrawer, setShowDrawer] = useState(false);
-  // ================= ESTADOS INACTIVIDAD =================
-  const [mostrarAlertaInactividad, setMostrarAlertaInactividad] = useState(false);
-  const timerInactividad = useRef(null);
-  const timerCierre = useRef(null);
-  const TIEMPO_ALERTA = 28 * 60 * 1000;
-  const TIEMPO_CIERRE_FINAL = 2 * 60 * 1000;
-  const resetearTemporizadores = () => {
-    if (timerInactividad.current) clearTimeout(timerInactividad.current);
-    if (timerCierre.current) clearTimeout(timerCierre.current);
-    if (user) {
-      timerInactividad.current = setTimeout(() => {
-        setMostrarAlertaInactividad(true);
-        timerCierre.current = setTimeout(() => {
-          forzarCierrePorInactividad();
-        }, TIEMPO_CIERRE_FINAL);
-      }, TIEMPO_ALERTA);
-    }
-  };
-  const forzarCierrePorInactividad = () => {
-    localStorage.clear();
-    sessionStorage.clear();
-    const API_URL = window.location.hostname.includes('goldanda.cl')
-      ? 'https://evap.maq.goldanda.cl'
-      : `http://${window.location.hostname || 'localhost'}:3001`;
-    fetch(`${API_URL}/api/live`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
-    }).catch(err => console.log('Live limpiado (Inactividad)', err));
-    setUser(null);
-    setMostrarAlertaInactividad(false);
-    setCurrentView('home');
-    setDatosProcesoActivo(null);
-    alert("Tu sesión se ha cerrado por inactividad prolongada por tu seguridad.");
-  };
-  const mantenerSesionViva = () => {
-    setMostrarAlertaInactividad(false);
-    resetearTemporizadores();
-  };
-  useEffect(() => {
-    if (!user) return;
-    let ultimoMovimiento = Date.now();
-    const handleActividad = () => {
-      const ahora = Date.now();
-      if (ahora - ultimoMovimiento > 2000 && !mostrarAlertaInactividad) {
-        ultimoMovimiento = ahora;
-        resetearTemporizadores();
-      }
-    };
-    const eventos = ['mousemove', 'keydown', 'click', 'touchstart', 'scroll'];
-    eventos.forEach(evt => window.addEventListener(evt, handleActividad));
-    resetearTemporizadores();
-    return () => {
-      eventos.forEach(evt => window.removeEventListener(evt, handleActividad));
-      if (timerInactividad.current) clearTimeout(timerInactividad.current);
-      if (timerCierre.current) clearTimeout(timerCierre.current);
-    };
-  }, [user, mostrarAlertaInactividad]);
   // ================= ESTADOS INTERCEPTOR DE NAVEGACIÓN =================
   const [vistaPendiente, setVistaPendiente] = useState(null);
   const [mostrarAlertaSalida, setMostrarAlertaSalida] = useState(false);
   const [mostrarConfirmacionLogout, setMostrarConfirmacionLogout] = useState(false);
   const vistasProtegidas = ['nuevo-proceso', 'inspeccion'];
-  const intentarNavegar = (nuevaVista) => {
-    if (nuevaVista === currentView) return;
+  const guardSalidaTemperatura = useRef(null);
+  const registrarGuardTemperatura = useCallback(guard => { guardSalidaTemperatura.current = guard; }, []);
+  const continuarNavegacion = (nuevaVista) => {
+    // Cierra el menú incluso si vuelven a pulsar el módulo actual.
     setShowDrawer(false);
+    if (nuevaVista === currentView) return;
     if (['historial', 'ajustes-exportadoras', 'ajustes-variedades', 'ajustes-huertos', 'ajustes-parametros', 'ajustes-usuarios'].includes(nuevaVista)) {
       setIsCollapsed(true);
     } else if (nuevaVista === 'nuevo-proceso' || nuevaVista === 'home') {
@@ -145,6 +94,15 @@ export default function App() {
     } else {
       setCurrentView(nuevaVista);
     }
+  };
+  const intentarNavegar = (nuevaVista) => {
+    setShowDrawer(false);
+    if (nuevaVista === currentView) return;
+    // Bloquea cambios de ventana mientras exista una medición pendiente en temperatura.
+    if (currentView === 'digitacion-temperatura' && guardSalidaTemperatura.current) {
+      if (!guardSalidaTemperatura.current(() => continuarNavegacion(nuevaVista))) return;
+    }
+    continuarNavegacion(nuevaVista);
   };
   const confirmarSalida = () => {
     setCurrentView(vistaPendiente);
@@ -159,9 +117,6 @@ export default function App() {
     localStorage.removeItem('dashboardLive');
     localStorage.removeItem('inspeccionActiva');
     sessionStorage.clear();
-    const API_URL = window.location.hostname.includes('goldanda.cl')
-      ? 'https://evap.maq.goldanda.cl'
-      : `http://${window.location.hostname || 'localhost'}:3001`;
     fetch(`${API_URL}/api/live`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -180,9 +135,6 @@ export default function App() {
   });
   const cargarDatosMaestros = async () => {
     try {
-      const API_URL = window.location.hostname.includes('goldanda.cl')
-        ? 'https://evap.maq.goldanda.cl'
-        : `http://${window.location.hostname || 'localhost'}:3001`;
       const [expRes, varRes, hueRes, inspRes] = await Promise.all([
         fetch(`${API_URL}/api/exportadoras`),
         fetch(`${API_URL}/api/variedades`),
@@ -213,10 +165,15 @@ export default function App() {
     localStorage.setItem('qc_user_session', JSON.stringify(userData));
     setCurrentView('home');
   };
-  const handleLogout = () => setMostrarConfirmacionLogout(true);
+  const handleLogout = () => {
+    setShowDrawer(false);
+    if (currentView === 'digitacion-temperatura' && guardSalidaTemperatura.current) {
+      if (!guardSalidaTemperatura.current(() => setMostrarConfirmacionLogout(true))) return;
+    }
+    setMostrarConfirmacionLogout(true);
+  };
   const confirmarLogout = () => {
     setMostrarConfirmacionLogout(false); localStorage.clear(); sessionStorage.clear();
-    const API_URL=window.location.hostname.includes('goldanda.cl')?'https://evap.maq.goldanda.cl':`http://${window.location.hostname||'localhost'}:3001`;
     fetch(`${API_URL}/api/live`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})}).catch(err=>console.log('Live limpiado (Logout)',err));
     setUser(null); setCurrentView('home'); setIsCollapsed(false); setShowAjustes(false); setDashboardsAbierto(true); setShowDrawer(false); setDatosProcesoActivo(null);
   };
@@ -262,28 +219,6 @@ export default function App() {
       </div>
     </div>
   ) : null;
-  const ModalInactividad = mostrarAlertaInactividad ? (
-    <div className="fixed inset-0 z-[1000] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in">
-      <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl text-center">
-        <div className="p-8">
-          <div className="w-20 h-20 bg-orange-100 text-orange-500 rounded-full flex items-center justify-center mx-auto mb-6 animate-bounce">
-            <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <h3 className="text-2xl font-black text-slate-900 mb-3">¿Sigues ahí?</h3>
-          <p className="text-sm text-slate-500 leading-relaxed px-4">
-            Por tu seguridad, cerraremos tu sesión por inactividad en <span className="font-bold text-slate-800">pocos minutos</span>. ¿Deseas mantener tu sesión abierta?
-          </p>
-        </div>
-        <div className="bg-slate-50 px-6 py-5 flex gap-3 justify-center border-t border-slate-100">
-          <button onClick={mantenerSesionViva} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl w-full transition-colors shadow-md text-sm">
-            Sí, seguir trabajando
-          </button>
-        </div>
-      </div>
-    </div>
-  ) : null;
   if (!user) {
     return <Login onLogin={handleLogin} />;
   }
@@ -316,6 +251,7 @@ export default function App() {
         `}</style>
         {currentView === 'nuevo-proceso' && puedeCrearProceso && (
           <NuevoProceso
+            usuarioActual={user}
             exportadoras={dbData.exportadoras}
             productores={dbData.productores}
             variedades={dbData.variedades}
@@ -329,6 +265,7 @@ export default function App() {
         )}
         {currentView === 'inspeccion' && datosProcesoActivo && (
           <InspeccionModule
+            usuarioActual={user}
             datosProceso={datosProcesoActivo}
             onAbrirMenu={() => setShowDrawer(true)}
             onVolver={() => {
@@ -419,14 +356,14 @@ export default function App() {
                 {puedeDigitacion && (
                   <>
                     <div className="pt-4 mt-2 mb-2 border-t border-[#F1F5F9]">
-                      <p className="px-4 text-[11px] font-bold text-[#94A3B8] uppercase tracking-wider">Digitación</p>
+                      <p className="px-4 text-[11px] font-bold text-[#94A3B8] uppercase tracking-wider">Control temperatura</p>
                     </div>
                     <button
                       onClick={() => intentarNavegar('digitacion-temperatura')}
                       className={`group w-full flex items-center px-3.5 py-2.5 rounded-[10px] transition-all duration-150 ${currentView === 'digitacion-temperatura' ? 'bg-[#FFF7ED] border border-[#FFEDD5] text-[#9A3412]' : 'text-[#1E293B] hover:bg-[#F8FAFC] hover:text-[#0F172A] hover:translate-x-[3px]'}`}
                     >
                       <Thermometer className="w-5 h-5 text-[#EA580C] shrink-0 group-hover:scale-[1.06] transition-transform duration-150" />
-                      <span className="text-[14px] font-semibold truncate ml-3">Temperatura en línea</span>
+                      <span className="text-[14px] font-semibold truncate ml-3">Control Temperatura</span>
                     </button>
                   </>
                 )}
@@ -477,7 +414,6 @@ export default function App() {
         )}
         {ModalLogout}
         {ModalAdvertencia}
-        {ModalInactividad}
       </div>
     );
   }
@@ -507,7 +443,11 @@ export default function App() {
           box-shadow: none;
         }
       `}</style>
-      <aside className={`${isCollapsed ? 'w-20' : 'w-[260px]'} bg-[#FFFFFF] border-r border-[#F1F5F9] flex flex-col shadow-[0_1px_3px_rgba(0,0,0,0.02)] z-20 shrink-0 transition-all duration-300 relative`}>
+      {showDrawer && ocultarSidebarEnMovil && (
+        <button type="button" aria-label="Cerrar menú lateral" onClick={() => setShowDrawer(false)} className="fixed inset-0 z-[190] bg-slate-900/40 backdrop-blur-[1px] md:hidden" />
+      )}
+      {/* Se reutiliza el sidebar habitual de EVAP: en móvil se muestra como overlay compacto. */}
+      <aside className={`${ocultarSidebarEnMovil ? (showDrawer ? 'flex fixed inset-y-0 left-0 md:relative' : 'hidden md:flex') : 'flex'} ${isCollapsed ? 'w-20' : 'w-[260px]'} bg-[#FFFFFF] border-r border-[#F1F5F9] flex-col shadow-[0_1px_3px_rgba(0,0,0,0.02)] ${ocultarSidebarEnMovil && showDrawer ? 'z-[200] md:z-20' : 'z-20'} shrink-0 transition-all duration-300 ${ocultarSidebarEnMovil && showDrawer ? '' : 'relative'}`}>
         <button onClick={() => setIsCollapsed(!isCollapsed)} className="absolute -right-3 top-7 bg-white border border-[#E2E8F0] text-[#475569] rounded-full p-1 shadow-md hover:bg-[#F8FAFC] transition-colors z-30">
           {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
         </button>
@@ -573,15 +513,15 @@ export default function App() {
           {puedeDigitacion && (
             <>
               <div className="pt-4 mt-2 mb-2 border-t border-[#F1F5F9]">
-                {!isCollapsed && <p className="px-4 text-[11px] font-bold text-[#94A3B8] uppercase tracking-wider">Digitación</p>}
+                {!isCollapsed && <p className="px-4 text-[11px] font-bold text-[#94A3B8] uppercase tracking-wider">Control temperatura</p>}
               </div>
               <button
                 onClick={() => intentarNavegar('digitacion-temperatura')}
-                title={isCollapsed ? 'Temperatura en línea' : undefined}
+                title={isCollapsed ? 'Control Temperatura' : undefined}
                 className={`group w-full flex items-center ${isCollapsed ? 'justify-center px-0 py-2.5' : 'px-3.5 py-2.5'} rounded-[10px] transition-all duration-200 ${currentView === 'digitacion-temperatura' ? 'bg-[#FFF7ED] border border-[#FFEDD5] text-[#9A3412]' : 'text-[#1E293B] hover:bg-[#F8FAFC] hover:text-[#0F172A] hover:translate-x-[3px]'}`}
               >
                 <Thermometer className="w-5 h-5 text-[#EA580C] shrink-0 group-hover:scale-[1.06] transition-transform duration-200" />
-                {!isCollapsed && <span className="text-[14px] font-semibold truncate ml-3">Temperatura en línea</span>}
+                {!isCollapsed && <span className="text-[14px] font-semibold truncate ml-3">Control Temperatura</span>}
               </button>
             </>
           )}
@@ -637,7 +577,7 @@ export default function App() {
           </button>
         </div>
       </aside>
-      <main className="flex-1 h-full overflow-hidden">
+      <main className="flex-1 min-w-0 h-full overflow-hidden">
         {currentView === 'home' && (
           <div className="w-full h-full p-4 md:p-8 flex items-center justify-center animate-fade-in">
             <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm w-full h-full flex flex-col items-center justify-center p-8 text-center">
@@ -649,10 +589,28 @@ export default function App() {
         )}
         {/* === RENDERIZADO DE MÓDULOS SEGÚN VISTA === */}
         {currentView === 'historial' && puedeVerHistorial && (
-          <HistorialProcesosView onVerResumen={(proceso)=>console.log('Resumen:',proceso)} userRole={user.role} usuarioId={user.id} puedeEditar={puedeEditarInformes} puedeEliminar={puedeEliminarProcesos}/>
+          <HistorialProcesosView
+            onVerResumen={(proceso) => console.log('Resumen:', proceso)}
+            onAbrirMenu={() => {
+              // Abrir la barra lateral original de EVAP en tamaño completo.
+              setIsCollapsed(false);
+              setShowDrawer(true);
+            }}
+            userRole={user.role}
+            usuarioId={user.id}
+            usuarioNombre={user.username}
+            puedeEditar={puedeEditarInformes}
+            puedeEliminar={puedeEliminarProcesos}
+          />
         )}
         {currentView === 'digitacion-temperatura' && puedeDigitacion && (
-          <TemperaturaLineaModule usuarioId={user.id} />
+          <TemperaturaLineaModule
+            usuarioId={user.id}
+            userRole={user.role}
+            plantaId={user.planta_id ?? user.plantaId ?? null}
+            onAbrirMenu={() => { setIsCollapsed(false); setShowDrawer(true); }}
+            onRegistrarGuardSalida={registrarGuardTemperatura}
+          />
         )}
         {currentView === 'ajustes-exportadoras' && puedeGestionarAjustes && <div className="p-6 md:p-8 overflow-y-auto h-full animate-fade-in"><GestionExportadoras exportadoras={dbData.exportadoras} setExportadoras={(nuevas) => setDbData(prev => ({ ...prev, exportadoras: nuevas }))} /></div>}
         {currentView === 'ajustes-variedades' && puedeGestionarAjustes && <div className="p-6 md:p-8 overflow-y-auto h-full animate-fade-in"><GestionVariedades variedades={dbData.variedades} setVariedades={(nuevas) => setDbData(prev => ({ ...prev, variedades: nuevas }))} /></div>}
@@ -662,7 +620,6 @@ export default function App() {
       </main>
       {ModalLogout}
       {ModalAdvertencia}
-      {ModalInactividad}
     </div>
   );
 }

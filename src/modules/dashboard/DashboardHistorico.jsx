@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ResponsiveContainer, LineChart, ComposedChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ReferenceLine, ReferenceArea } from 'recharts';
 import { Menu, X, BarChart3, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
+import { API_URL } from '../../config/api.js';
 const useCountUp = (endValue, duration = 1000, decimals = 0) => {
   const [count, setCount] = useState(0);
   useEffect(() => {
@@ -68,13 +69,13 @@ const customStyles = `
     background: transparent;
   }
   .auto-scroll-list::-webkit-scrollbar-thumb {
-    background-color: rgba(148, 163, 184, 0.15); 
+    background-color: rgba(148, 163, 184, 0.15);
     border-radius: 10px;
     transition: background-color 0.3s ease;
   }
   .auto-scroll-list:hover::-webkit-scrollbar-thumb,
   .auto-scroll-list:active::-webkit-scrollbar-thumb {
-    background-color: rgba(148, 163, 184, 0.8); 
+    background-color: rgba(148, 163, 184, 0.8);
   }
   @keyframes fadeInUp {
     0% { opacity: 0; transform: translateY(22px) scale(.985); }
@@ -106,7 +107,6 @@ const customStyles = `
   @media (min-width: 1800px) {
     .kpi-card { min-height: 108px !important; height: 108px !important; }
   }
-
 `;
 // === HELPER: Obtener fecha de hoy ===
 const getHoyStr = () => {
@@ -144,9 +144,34 @@ const getLocalYYYYMMDD = (fechaVal) => {
 };
 const SUM_CALIDAD = 'Sumatoria de calidad';
 const SUM_CONDICION = 'Sumatoria de condición';
-const API_URL = window.location.hostname.includes('goldanda.cl')
-  ? 'https://evap.maq.goldanda.cl'
-  : `http://${window.location.hostname || 'localhost'}:3001`;
+// Identidad de planta; las direcciones de consulta solo se obtienen de API_URL.
+const PLANTAS_HISTORICO = Object.freeze({ MAQ: 'Maquehua', ROS: 'Rosario' });
+const PLANTA_POR_HOST = Object.freeze({
+  'evap.maq.goldanda.cl': 'MAQ',
+  '192.168.0.10': 'MAQ',
+  'evap.ros.goldanda.cl': 'ROS',
+  '192.168.10.10': 'ROS'
+});
+const validarPlantaHistorico = datos => {
+  const plantaId = String(datos?.plantaId || '').trim().toUpperCase();
+  if (!Object.prototype.hasOwnProperty.call(PLANTAS_HISTORICO, plantaId)) {
+    throw new Error('El backend no informó una planta válida (MAQ o ROS). Revisa /api/planta.');
+  }
+  const plantaNombre = PLANTAS_HISTORICO[plantaId];
+  const nombreRecibido = String(datos?.plantaNombre || '').trim();
+  if (nombreRecibido && nombreRecibido.toLowerCase() !== plantaNombre.toLowerCase()) {
+    throw new Error('El identificador y el nombre de planta no coinciden. Revisa /api/planta.');
+  }
+  for (const valor of [window.location.hostname, new URL(API_URL).hostname]) {
+    const host = String(valor || '').toLowerCase().replace(/\.$/, '');
+    const esperada = Object.prototype.hasOwnProperty.call(PLANTA_POR_HOST, host) ? PLANTA_POR_HOST[host] : null;
+    if (esperada && esperada !== plantaId) {
+      throw new Error(`Esta dirección corresponde a ${PLANTAS_HISTORICO[esperada]}, pero el backend informa ${plantaNombre}. Revisa el proxy y PLANTA_ID.`);
+    }
+  }
+  // En localhost se usa la identidad declarada por el backend, sin suponer una planta.
+  return { plantaId, plantaNombre };
+};
 const numeroParametro = valor => {
   const n = Number(String(valor ?? '').replace(',', '.'));
   return Number.isFinite(n) ? n : null;
@@ -309,9 +334,9 @@ const CustomDatePicker = ({ dateStr, minDateStr, maxDateStr, onChange, diasConPr
 const GaugeCard = ({ title, value, objText, colors, thresholds, labels, invertedLogic = false }) => {
   const anim = useCountUp(value, 1000, 1);
   const colorGradients = {
-    '#ef4444': { start: '#ef4444', end: '#dc2626' }, 
-    '#f59e0b': { start: '#f59e0b', end: '#d97706' }, 
-    '#10b981': { start: '#10b981', end: '#059669' }  
+    '#ef4444': { start: '#ef4444', end: '#dc2626' },
+    '#f59e0b': { start: '#f59e0b', end: '#d97706' },
+    '#10b981': { start: '#10b981', end: '#059669' }
   };
   const gradId1 = `grad-${title.replace(/\s+/g, '')}-1`;
   const gradId2 = `grad-${title.replace(/\s+/g, '')}-2`;
@@ -410,7 +435,6 @@ const PuntoEvolucion = ({ cx, cy, value, color, labelColor, seleccionado = false
     </g>
   );
 };
-
 const redondearPasoSuperior = (valor, paso = 0.5) => {
   const num = Number(valor) || 0;
   if (num <= 0) return paso;
@@ -492,7 +516,6 @@ const ChipSerieDefecto = ({ item, activo, visible, onToggle, onHoverStart, onHov
     <span className="text-[9px] sm:text-[9.5px] xl:text-[10px] font-black whitespace-nowrap truncate" style={{ color: '#0F172A' }}>{item.nombre}</span>
   </div>
 );
-
 const normalizarDefectoGrafico = texto => String(texto || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 const valorDefectoSeleccionado = (met, tipo) => {
   const todos = { ...(met?.agregadoCal || {}), ...(met?.agregadoCond || {}) };
@@ -523,6 +546,10 @@ const BarraDefecto = ({ nombre, pct, colorClass }) => {
 export default function DashboardHistoricoTemporada({ onClose, onAbrirMenu }) {
   const [allInspecciones, setAllInspecciones] = useState([]);
   const [parametrosActuales, setParametrosActuales] = useState({ calidad: [], condicion: [] });
+  const [planta, setPlanta] = useState(null);
+  const [cargando, setCargando] = useState(true);
+  const [errorCarga, setErrorCarga] = useState('');
+  const [intentoCarga, setIntentoCarga] = useState(0);
   // Slider y Semanas
   const [fechasDisponibles, setFechasDisponibles] = useState([]);
   const [diasConProcesos, setDiasConProcesos] = useState([]);
@@ -537,7 +564,7 @@ export default function DashboardHistoricoTemporada({ onClose, onAbrirMenu }) {
     { name: 'A2', descripcion: 'Regular', value: 0.0001, displayValue: 0, color: '#eab308' },
     { name: 'A3', descripcion: 'Crítico', value: 0.0001, displayValue: 0, color: '#f43f5e' }
   ]);
-  const [evolucionNotas, setEvolucionNotas] = useState([]); 
+  const [evolucionNotas, setEvolucionNotas] = useState([]);
   const [evolucionDefectos, setEvolucionDefectos] = useState([]);
   const [evolucionExportable, setEvolucionExportable] = useState([]);
   const [defectosCalidad, setDefectosCalidad] = useState([]);
@@ -575,43 +602,80 @@ export default function DashboardHistoricoTemporada({ onClose, onAbrirMenu }) {
     return () => clearTimeout(t);
   }, [animacionId]);
   useEffect(() => {
+    let activo = true;
+    let tiempoAgotado = false;
+    const controller = new AbortController();
+    const temporizador = setTimeout(() => {
+      tiempoAgotado = true;
+      controller.abort();
+    }, 15000);
+    const opciones = { method: 'GET', cache: 'no-store', redirect: 'error', signal: controller.signal };
     const cargarDatos = async () => {
+      setCargando(true);
+      setErrorCarga('');
+      setPlanta(null);
       try {
+        // Verificar la planta antes de consultar sus inspecciones y parámetros.
+        const resPlanta = await fetch(`${API_URL}/api/planta`, opciones);
+        if (!resPlanta.ok) throw new Error(`No se pudo identificar la planta (HTTP ${resPlanta.status}). Comprueba que el backend tenga /api/planta.`);
+        const plantaVerificada = validarPlantaHistorico(await resPlanta.json());
+        if (!activo) return;
+        if (controller.signal.aborted) throw new Error('Consulta cancelada.');
+        setPlanta(plantaVerificada);
         const [resInspecciones, resParametros] = await Promise.all([
-          fetch(`${API_URL}/api/inspecciones`),
-          fetch(`${API_URL}/api/parametros`)
+          fetch(`${API_URL}/api/inspecciones`, opciones),
+          fetch(`${API_URL}/api/parametros`, opciones)
         ]);
+        if (!resInspecciones.ok) throw new Error(`No se pudieron cargar las inspecciones (HTTP ${resInspecciones.status}).`);
         const data = await resInspecciones.json();
+        if (!Array.isArray(data)) throw new Error('El backend no devolvió una lista de inspecciones válida.');
         const parametros = resParametros.ok ? await resParametros.json() : { calidad: [], condicion: [] };
-        setParametrosActuales({
-          calidad: Array.isArray(parametros.calidad) ? parametros.calidad : [],
-          condicion: Array.isArray(parametros.condicion) ? parametros.condicion : []
-        });
-        if (!Array.isArray(data)) return;
-        setAllInspecciones(data);
+        if (!activo) return;
+        if (controller.signal.aborted) throw new Error('Consulta cancelada.');
         const processDates = data.map(p => getLocalYYYYMMDD(p.createdAt || p.fecha)).filter(Boolean);
-        setDiasConProcesos([...new Set(processDates)]);
+        const diasRegistrados = [...new Set(processDates)];
         const hoyStrLocal = getLocalYYYYMMDD(getHoyStr());
         if (hoyStrLocal) processDates.push(hoyStrLocal);
         const uniqueDates = [...new Set(processDates)].sort();
-        if (!uniqueDates.length) return;
-        const [minY, minM, minD] = uniqueDates[0].split('-');
-        const [maxY, maxM, maxD] = uniqueDates[uniqueDates.length - 1].split('-');
-        const curr = new Date(+minY, +minM - 1, +minD, 12, 0, 0);
-        const fin = new Date(+maxY, +maxM - 1, +maxD, 12, 0, 0);
         const continuousDates = [];
-        while (curr <= fin) {
-          continuousDates.push(`${curr.getFullYear()}-${String(curr.getMonth() + 1).padStart(2, '0')}-${String(curr.getDate()).padStart(2, '0')}`);
-          curr.setDate(curr.getDate() + 1);
+        if (uniqueDates.length) {
+          const [minY, minM, minD] = uniqueDates[0].split('-');
+          const [maxY, maxM, maxD] = uniqueDates[uniqueDates.length - 1].split('-');
+          const curr = new Date(+minY, +minM - 1, +minD, 12, 0, 0);
+          const fin = new Date(+maxY, +maxM - 1, +maxD, 12, 0, 0);
+          while (curr <= fin) {
+            continuousDates.push(`${curr.getFullYear()}-${String(curr.getMonth() + 1).padStart(2, '0')}-${String(curr.getDate()).padStart(2, '0')}`);
+            curr.setDate(curr.getDate() + 1);
+          }
         }
+        setParametrosActuales({
+          calidad: Array.isArray(parametros?.calidad) ? parametros.calidad : [],
+          condicion: Array.isArray(parametros?.condicion) ? parametros.condicion : []
+        });
+        setAllInspecciones(data);
+        setDiasConProcesos(diasRegistrados);
         setFechasDisponibles(continuousDates);
-        setRangoIndices([0, continuousDates.length - 1]);
+        setRangoIndices([0, Math.max(0, continuousDates.length - 1)]);
       } catch (err) {
+        if (!activo) return;
+        const mensaje = tiempoAgotado
+          ? 'El servidor no respondió a tiempo. Revisa la conexión e intenta nuevamente.'
+          : err instanceof SyntaxError
+            ? 'El servidor no devolvió JSON válido. Revisa el backend y el proxy /api.'
+            : err instanceof TypeError
+              ? 'No se pudo cargar el histórico de temporada. Revisa la conexión y la respuesta del backend.'
+              : err.message || 'No se pudo cargar el histórico de temporada.';
+        setErrorCarga(mensaje);
         console.error('Error cargando histórico de temporada:', err);
+        controller.abort();
+      } finally {
+        clearTimeout(temporizador);
+        if (activo) setCargando(false);
       }
     };
     cargarDatos();
-  }, []);
+    return () => { activo = false; clearTimeout(temporizador); controller.abort(); };
+  }, [intentoCarga]);
   // Recalcula todo el histórico cada vez que cambia el rango seleccionado.
   useEffect(() => {
     if (!allInspecciones.length || !fechasDisponibles.length) return;
@@ -831,12 +895,22 @@ export default function DashboardHistoricoTemporada({ onClose, onAbrirMenu }) {
       <div className="flex items-center justify-between bg-white border-b border-slate-200 px-3 sm:px-4 py-2.5 sm:py-3 shrink-0 z-50 shadow-sm">
         <div className="flex items-center gap-3">
           <button onClick={onAbrirMenu} className="p-2 text-slate-500 hover:bg-slate-100 rounded-lg"><Menu className="w-5 h-5" /></button>
-          <div className="flex items-center gap-2"><BarChart3 className="w-5 h-5 text-[#E96008]"/><h1 className="text-[13px] sm:text-[14px] lg:text-[15px] font-black text-slate-800 tracking-tight">Resumen de calidad histórico de temporada</h1></div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2"><BarChart3 className="w-5 h-5 text-[#E96008]"/><h1 className="text-[13px] sm:text-[14px] lg:text-[15px] font-black text-slate-800 tracking-tight">Resumen de calidad histórico de temporada</h1></div>
+            <p className="mt-0.5 text-[11px] font-semibold text-slate-500" aria-live="polite">{planta ? `Planta ${planta.plantaNombre}` : cargando ? 'Verificando planta...' : 'Planta sin identificar'}</p>
+          </div>
         </div>
         <button onClick={onClose} className="p-2 text-slate-500 hover:bg-red-50 hover:text-red-500 rounded-lg"><X className="w-5 h-5" /></button>
       </div>
       <div className="flex-1 overflow-x-auto overflow-y-auto custom-scrollbar relative z-10">
         <div className="w-full min-w-0 px-3 sm:px-4 md:px-6 lg:px-8 pt-2 md:pt-3 lg:pt-4 pb-4 md:pb-6 lg:pb-8 space-y-4 md:space-y-6">
+          {errorCarga && (
+            <div role="alert" className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <p className="font-semibold">{errorCarga}</p>
+              <button type="button" onClick={() => setIntentoCarga(v => v + 1)} disabled={cargando} className="shrink-0 rounded-lg border border-red-200 bg-white px-4 py-2 text-xs font-bold hover:bg-red-100 disabled:opacity-50">Reintentar</button>
+            </div>
+          )}
+          {cargando && <p role="status" className="text-[12px] font-semibold text-slate-500">Cargando histórico de temporada...</p>}
           {/* CONTROLES SUPERIORES: FILTROS A LA IZQUIERDA Y RANGO A LA DERECHA */}
           <div className="flex flex-col lg:flex-row lg:justify-between items-stretch lg:items-start relative z-40 mb-2 pb-3 gap-4 lg:gap-6">
             <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_1px_minmax(0,1fr)] items-end gap-3 pt-0.5 w-full lg:w-auto">

@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# Configuracion privada de EVAP
+.env
+.env.*
+!.env.example

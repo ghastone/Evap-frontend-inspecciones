@@ -1,37 +1,27 @@
 import React, { useState } from 'react';
 import { Plus, Trash2, Building2 } from 'lucide-react';
-
+import { API_URL } from '../../config/api.js';
 export default function GestionExportadoras({ exportadoras, setExportadoras }) {
   const [nombreNueva, setNombreNueva] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-
-  // === URL INTELIGENTE CENTRALIZADA ===
-  const API_URL = window.location.hostname.includes('goldanda.cl') 
-    ? 'https://evap.maq.goldanda.cl' 
-    : `http://${window.location.hostname || 'localhost'}:3001`;
-
-  const agregarExportadora = async (e) => {
+  const agregarExportadora = async e => {
     e.preventDefault();
     const nombre = nombreNueva.trim();
-    
     if (!nombre) return;
     if (exportadoras.includes(nombre)) {
       alert('Esta exportadora ya existe.');
       return;
     }
-
     setIsLoading(true);
-
     try {
       const res = await fetch(`${API_URL}/api/exportadoras`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nombre })
       });
-
       if (res.ok) {
         setExportadoras([...exportadoras, nombre]);
-        setNombreNueva(''); 
+        setNombreNueva('');
       } else {
         alert('Error al guardar la exportadora en la base de datos.');
       }
@@ -42,15 +32,10 @@ export default function GestionExportadoras({ exportadoras, setExportadoras }) {
       setIsLoading(false);
     }
   };
-
-  const eliminarExportadora = async (nombre) => {
+  const eliminarExportadora = async nombre => {
     if (window.confirm(`¿Estás seguro de eliminar la exportadora "${nombre}"?`)) {
       try {
-        // Ya no es necesario definir API_URL aquí porque usa la centralizada de arriba
-        const res = await fetch(`${API_URL}/api/exportadoras/${encodeURIComponent(nombre)}`, {
-          method: 'DELETE'
-        });
-
+        const res = await fetch(`${API_URL}/api/exportadoras/${encodeURIComponent(nombre)}`, { method: 'DELETE' });
         if (res.ok) {
           setExportadoras(exportadoras.filter(e => e !== nombre));
         } else {
@@ -62,38 +47,30 @@ export default function GestionExportadoras({ exportadoras, setExportadoras }) {
       }
     }
   };
-
   return (
     <div className="bg-white rounded-[32px] p-6 md:p-8 shadow-sm border border-slate-100 max-w-4xl mx-auto space-y-6">
-      
       <div className="flex items-center gap-3 mb-2">
         <div className="w-1.5 h-7 bg-[#FF5500] rounded-full"></div>
         <h2 className="text-2xl font-bold text-slate-900">Exportadoras</h2>
       </div>
-
-      {/* NUEVO DISEÑO: FORMULARIO DE INGRESO */}
       <form onSubmit={agregarExportadora} className="bg-slate-50/70 border border-slate-200 rounded-2xl p-5 mb-6">
         <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">
           <Building2 className="w-4 h-4 text-[#FF5500]" />
           Registrar Nueva Exportadora
         </h3>
-        
         <div className="flex flex-col sm:flex-row gap-4 items-end">
           <div className="flex-1 w-full">
-            <label htmlFor="nombreExportadora" className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase tracking-wider">
-              Nombre de la Empresa
-            </label>
+            <label htmlFor="nombreExportadora" className="block text-[11px] font-bold text-slate-500 mb-1.5 uppercase tracking-wider">Nombre de la Empresa</label>
             <input
               id="nombreExportadora"
               type="text"
               placeholder="Ej. Agrícola del Norte S.A."
               value={nombreNueva}
-              onChange={(e) => setNombreNueva(e.target.value)}
+              onChange={e => setNombreNueva(e.target.value)}
               disabled={isLoading}
               className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#FF5500]/40 focus:border-[#FF5500]/60 transition-all shadow-sm"
             />
           </div>
-          
           <button
             type="submit"
             disabled={isLoading}
@@ -104,8 +81,6 @@ export default function GestionExportadoras({ exportadoras, setExportadoras }) {
           </button>
         </div>
       </form>
-
-      {/* TABLA DE REGISTROS */}
       <div className="border border-slate-200/70 rounded-2xl overflow-hidden mt-4">
         <table className="w-full text-left border-collapse">
           <thead>
@@ -118,9 +93,7 @@ export default function GestionExportadoras({ exportadoras, setExportadoras }) {
           <tbody className="divide-y divide-slate-100 text-sm text-slate-700">
             {exportadoras.length === 0 ? (
               <tr>
-                <td colSpan="3" className="py-8 text-center text-slate-400 font-medium">
-                  No hay exportadoras registradas
-                </td>
+                <td colSpan="3" className="py-8 text-center text-slate-400 font-medium">No hay exportadoras registradas</td>
               </tr>
             ) : (
               exportadoras.map((exp, index) => (
