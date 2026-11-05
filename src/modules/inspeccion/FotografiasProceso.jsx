@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertTriangle, Camera, CheckCircle2, Image as ImageIcon, Loader2,
   Minus, Plus, RotateCcw, Save, X, ZoomIn
@@ -12,7 +13,11 @@ const VISTA_ANCHO = 500;
 const VISTA_ALTO = 600;
 const MAX_DATA_URL = 520 * 1024; // Incluye el base64 (evita el HTTP 413 del proxy móvil).
 const MAX_ARCHIVO = 60 * 1024 * 1024;
-const ZOOM_MAX = 3;
+const ZOOM_MIN = 1; // 100% = cover, evita margenes vacios.
+const ZOOM_INICIAL = 1.12; // Permite alejar desde 112% hasta el encuadre completo.
+const ZOOM_MAX = 2.6;
+const LONGITUD_NORMALIZADA = 1650;
+const ES_IOS = typeof navigator !== 'undefined' && (/iPad|iPhone|iPod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
 const limitar = (valor, minimo, maximo) => Math.max(minimo, Math.min(maximo, valor));
 
 function limitarPosicion(imagen, zoom, posicion) {
@@ -62,6 +67,9 @@ function exportarRecorte(imagen, zoom, posicion) {
     canvas.width = ancho;
     canvas.height = Math.round(ancho * VISTA_ALTO / VISTA_ANCHO);
     dibujarRecorte(ctx, imagen, zoom, posicion, canvas.width, canvas.height);
+    if (salidaVisiblementeNegra(ctx, canvas.width, canvas.height)) {
+      throw new Error('La imagen se exportaria en negro. Elige otra fotografia o utiliza el selector de Fotos.');
+    }
     for (const calidad of calidades) {
       const resultado = canvas.toDataURL('image/jpeg', calidad);
       if (resultado.startsWith('data:image/jpeg;base64,') && resultado.length <= MAX_DATA_URL) {
@@ -78,30 +86,160 @@ function distanciaEntrePuntos(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
+// La camara del iPhone puede producir imagenes de decenas de megapixeles o HEIC.
+// No se envia un dataURL gigante a React ni se usa el archivo original en
+// cada repintado: el editor trabaja con un JPEG pequeno y normalizado.
+function cargarImagenPorUrl(url) {
+  return new Promise((resolve, reject) => {
+    const imagen = new Image();
+    imagen.onload = () => {
+      if (!imagen.naturalWidth || !imagen.naturalHeight) {
+        reject(new Error('El navegador no pudo decodificar la fotografia.'));
+      } else {
+        resolve(imagen);
+      }
+    };
+    imagen.onerror = () => reject(new Error('No se pudo abrir la foto. Prueba seleccionarla desde Fotos o utiliza el formato JPEG de la camara.'));
+    imagen.src = url;
+  });
+}
+
+function crearBlobJpeg(canvas, calidad) {
+  return new Promise((resolve, reject) => {
+    if (canvas.toBlob) {
+      canvas.toBlob(blob => blob?.size ? resolve(blob) : reject(new Error('No se pudo convertir la imagen a JPEG.')), 'image/jpeg', calidad);
+      return;
+    }
+    try {
+      const dataUrl = canvas.toDataURL('image/jpeg', calidad);
+      const binario = atob(dataUrl.split(',')[1]);
+      const bytes = new Uint8Array(binario.length);
+      for (let i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i);
+      resolve(new Blob([bytes], { type: 'image/jpeg' }));
+    } catch (error) { reject(error); }
+  });
+}
+
+// Detectar un render realmente negro antes de ofrecer guardar una foto defectuosa.
+function salidaVisiblementeNegra(ctx, ancho, alto) {
+  try {
+    // Evitar leer miles de pixeles: basta una cuadricula central.
+    const muestras = 10;
+    let negras = 0;
+    let total = 0;
+    for (let y = 0; y < muestras; y++) {
+      for (let x = 0; x < muestras; x++) {
+        const px = Math.min(ancho - 1, Math.round((x + 0.5) * ancho / muestras));
+        const py = Math.min(alto - 1, Math.round((y + 0.5) * alto / muestras));
+        const rgba = ctx.getImageData(px, py, 1, 1).data;
+        if (rgba[0] < 6 && rgba[1] < 6 && rgba[2] < 6) negras++;
+        total++;
+      }
+    }
+    return negras >= total * 0.99;
+  } catch (_) {
+    // No bloquear si Safari impide inspeccionar el canvas.
+    return false;
+  }
+}
+
+async function normalizarImagenParaMovil(archivo) {
+  const urlOriginal = URL.createObjectURL(archivo);
+  let bitmap = null;
+  let urlNormalizada = null;
+  try {
+    let fotoOriginal = null;
+    try {
+      fotoOriginal = await cargarImagenPorUrl(urlOriginal);
+    } catch (error) {
+      // Algunos navegadores pueden decodificar HEIC mediante createImageBitmap
+      // aunque el elemento IMG no lo soporte.
+      if (typeof createImageBitmap !== 'function') throw error;
+      try { bitmap = await createImageBitmap(archivo); } catch (_) { throw error; }
+    }
+    const anchoOriginal = fotoOriginal?.naturalWidth || bitmap?.width;
+    const altoOriginal = fotoOriginal?.naturalHeight || bitmap?.height;
+    if (!anchoOriginal || !altoOriginal) throw new Error('La foto no tiene dimensiones validas.');
+    const escala = Math.min(1, LONGITUD_NORMALIZADA / Math.max(anchoOriginal, altoOriginal));
+    const ancho = Math.max(1, Math.round(anchoOriginal * escala));
+    const alto = Math.max(1, Math.round(altoOriginal * escala));
+
+    // En navegadores que implementan decodificacion reducida, se limita el
+    // trabajo de memoria ANTES de pasarlo al canvas, clave en fotos de 48 MP.
+    if (!bitmap && escala < 1 && typeof createImageBitmap === 'function') {
+      try {
+        const reducido = await createImageBitmap(archivo, {
+          resizeWidth: ancho,
+          resizeHeight: alto,
+          resizeQuality: 'high',
+          imageOrientation: 'from-image'
+        });
+        // Algunos navegadores ignoran los parametros resize. Aun asi se puede
+        // usar la imagen HTML ya decodificada como alternativa.
+        if (reducido.width <= ancho * 1.1 && reducido.height <= alto * 1.1) {
+          bitmap = reducido;
+        } else {
+          reducido.close?.();
+        }
+      } catch (_) { /* Alternativa compatible: IMG + drawImage. */ }
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = ancho;
+    canvas.height = alto;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) throw new Error('No se pudo iniciar el procesador de imagenes del telefono.');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, ancho, alto);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    const fuente = bitmap || fotoOriginal;
+    ctx.drawImage(fuente, 0, 0, ancho, alto);
+    if (salidaVisiblementeNegra(ctx, ancho, alto) && bitmap && fotoOriginal) {
+      // Segundo intento: decodificacion HTML, por si la ruta ImageBitmap
+      // devolvio fotogramas negros en un WebKit particular.
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, ancho, alto);
+      ctx.drawImage(fotoOriginal, 0, 0, ancho, alto);
+    }
+    if (salidaVisiblementeNegra(ctx, ancho, alto)) {
+      throw new Error('La fotografia se proceso en negro. Toma otra foto desde el selector del iPhone o elige una de Fotos.');
+    }
+    const jpeg = await crearBlobJpeg(canvas, 0.88);
+    // Liberar buffers grandes antes de abrir el editor.
+    canvas.width = 1;
+    canvas.height = 1;
+    urlNormalizada = URL.createObjectURL(jpeg);
+    const imagen = await cargarImagenPorUrl(urlNormalizada);
+    const resultado = { imagen, url: urlNormalizada };
+    urlNormalizada = null; // La url pertenece ahora al editor.
+    return resultado;
+  } finally {
+    bitmap?.close?.();
+    URL.revokeObjectURL(urlOriginal);
+    if (urlNormalizada) URL.revokeObjectURL(urlNormalizada);
+  }
+}
+
 // Separado del módulo principal: no se desmonta ni pierde el gesto cuando
 // InspeccionModule sincroniza usuarios/cajas en segundo plano.
-function EditorEncuadre({ tipo, imagen, guardando, error, onGuardar, onCancelar, onOtraFoto }) {
-  const canvasRef = useRef(null);
+// Modal fuera de los contenedores del dashboard: evita el recorte y los
+// problemas de superposicion / composicion de Safari en iPhone.
+function EditorEncuadre({ tipo, imagen, imagenUrl, guardando, error, onGuardar, onCancelar, onOtraFoto }) {
   const puntosRef = useRef(new Map());
   const pinchRef = useRef(null);
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState(ZOOM_INICIAL);
   const [posicion, setPosicion] = useState({ x: 0, y: 0 });
   const [arrastrando, setArrastrando] = useState(false);
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d', { alpha: false });
-    if (ctx) dibujarRecorte(ctx, imagen, zoom, posicion, VISTA_ANCHO, VISTA_ALTO);
-  }, [imagen, zoom, posicion]);
-
   const modificarZoom = nuevo => {
-    const valor = limitar(Number(nuevo) || 1, 1, ZOOM_MAX);
+    const valor = limitar(Number(nuevo) || 1, ZOOM_MIN, ZOOM_MAX);
     setZoom(valor);
     setPosicion(actual => limitarPosicion(imagen, valor, actual));
   };
 
   const empezarGesto = evento => {
+    if (guardando) return;
     evento.preventDefault();
     evento.currentTarget.setPointerCapture?.(evento.pointerId);
     puntosRef.current.set(evento.pointerId, { x: evento.clientX, y: evento.clientY });
@@ -111,130 +249,154 @@ function EditorEncuadre({ tipo, imagen, guardando, error, onGuardar, onCancelar,
       pinchRef.current = { distancia: distanciaEntrePuntos(a, b), zoomInicial: zoom };
     }
   };
-
   const moverGesto = evento => {
     const puntos = puntosRef.current;
-    if (!puntos.has(evento.pointerId)) return;
+    if (!puntos.has(evento.pointerId) || guardando) return;
     evento.preventDefault();
     const anterior = puntos.get(evento.pointerId);
     puntos.set(evento.pointerId, { x: evento.clientX, y: evento.clientY });
     if (puntos.size === 2 && pinchRef.current) {
       const [a, b] = Array.from(puntos.values());
-      const proporcion = distanciaEntrePuntos(a, b) / Math.max(pinchRef.current.distancia, 1);
-      modificarZoom(pinchRef.current.zoomInicial * proporcion);
+      modificarZoom(pinchRef.current.zoomInicial * distanciaEntrePuntos(a, b) / Math.max(pinchRef.current.distancia, 1));
       return;
     }
     if (puntos.size !== 1) return;
     const rect = evento.currentTarget.getBoundingClientRect();
-    const deltaX = (evento.clientX - anterior.x) * VISTA_ANCHO / Math.max(rect.width, 1);
-    const deltaY = (evento.clientY - anterior.y) * VISTA_ALTO / Math.max(rect.height, 1);
-    setPosicion(actual => limitarPosicion(imagen, zoom, {
-      x: actual.x + deltaX,
-      y: actual.y + deltaY
-    }));
+    const dx = (evento.clientX - anterior.x) * VISTA_ANCHO / Math.max(rect.width, 1);
+    const dy = (evento.clientY - anterior.y) * VISTA_ALTO / Math.max(rect.height, 1);
+    setPosicion(actual => limitarPosicion(imagen, zoom, { x: actual.x + dx, y: actual.y + dy }));
   };
-
   const terminarGesto = evento => {
     puntosRef.current.delete(evento.pointerId);
     if (puntosRef.current.size < 2) pinchRef.current = null;
     if (!puntosRef.current.size) setArrastrando(false);
   };
-
-  const restablecer = () => {
-    setZoom(1);
+  const restaurar = () => {
+    setZoom(ZOOM_INICIAL);
     setPosicion({ x: 0, y: 0 });
   };
 
-  return (
-    <div className="fixed inset-0 z-[160] flex items-center justify-center bg-slate-950/80 p-2 sm:p-4" role="dialog" aria-modal="true" aria-label="Ajustar encuadre de fotografía">
-      <div className="flex w-full max-w-[440px] max-h-[94dvh] flex-col overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl custom-scrollbar">
-        <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
-          <div>
-            <p className="text-[10px] font-black uppercase tracking-wider text-[#ea580c]">Encuadre para informe</p>
-            <h3 className="text-base font-black text-slate-900">Embalaje {tipo === 'light' ? 'Light' : 'Dark'}</h3>
-          </div>
-          <button type="button" onClick={onCancelar} disabled={guardando} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600 disabled:opacity-50" aria-label="Cerrar editor"><X className="h-5 w-5" /></button>
-        </div>
+  // La vista usa IMG y CSS (no canvas) para evitar la pantalla negra en Safari.
+  // Solo usamos canvas al confirmar, sobre el JPEG previamente normalizado.
+  const anchoFoto = imagen.naturalWidth || imagen.width;
+  const altoFoto = imagen.naturalHeight || imagen.height;
+  const escala = Math.max(VISTA_ANCHO / anchoFoto, VISTA_ALTO / altoFoto) * zoom;
+  const anchoPct = anchoFoto * escala * 100 / VISTA_ANCHO;
+  const altoPct = altoFoto * escala * 100 / VISTA_ALTO;
+  const desplazamiento = limitarPosicion(imagen, zoom, posicion);
 
-        <div className="flex flex-col items-center gap-2 bg-slate-100 px-3 pt-3 pb-3">
-          <div className="w-full max-w-[300px] rounded-xl border-[3px] border-white bg-white shadow-lg overflow-hidden relative">
-            <canvas
-              ref={canvasRef}
-              width={VISTA_ANCHO}
-              height={VISTA_ALTO}
+  const modal = (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/65 p-2 sm:p-4" role="dialog" aria-modal="true" aria-label="Ajustar encuadre de fotografia" style={{ isolation: 'isolate' }}>
+      <div className="flex w-full max-w-[415px] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl" style={{ maxHeight: 'calc(100dvh - 16px)' }}>
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-100 px-4 py-2.5">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-wider text-orange-600">Encuadre para informe</p>
+            <h3 className="text-[15px] font-black text-slate-900">Embalaje {tipo === 'light' ? 'Light' : 'Dark'}</h3>
+          </div>
+          <button type="button" onClick={onCancelar} disabled={guardando} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 disabled:opacity-50" aria-label="Cerrar editor"><X className="h-4 w-4" /></button>
+        </header>
+
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3" style={{ WebkitOverflowScrolling: 'touch', overscrollBehavior: 'contain' }}>
+          <div className="mx-auto w-full max-w-[250px] overflow-hidden rounded-xl border-[3px] border-white bg-slate-100 shadow-md" style={{ boxShadow: '0 3px 18px rgba(15,23,42,0.16)' }}>
+            <div
+              className={`relative aspect-[5/6] w-full select-none overflow-hidden touch-none ${arrastrando ? 'cursor-grabbing' : 'cursor-grab'}`}
+              style={{ touchAction: 'none' }}
               onPointerDown={empezarGesto}
               onPointerMove={moverGesto}
               onPointerUp={terminarGesto}
               onPointerCancel={terminarGesto}
               onLostPointerCapture={terminarGesto}
-              className={`block aspect-[5/6] w-full select-none touch-none ${arrastrando ? 'cursor-grabbing' : 'cursor-grab'}`}
-              style={{ touchAction: 'none' }}
               aria-label="Arrastra la imagen para centrar la caja de cerezas"
-            />
-            <div className="pointer-events-none absolute inset-2 rounded-lg border border-dashed border-white/50 shadow-[inset_0_0_0_1px_rgba(15,23,42,0.14)]" />
+            >
+              <img
+                src={imagenUrl}
+                alt="Vista previa del encuadre"
+                draggable={false}
+                className="pointer-events-none absolute max-w-none select-none"
+                style={{
+                  width: `${anchoPct}%`, height: `${altoPct}%`,
+                  left: `${50 + desplazamiento.x * 100 / VISTA_ANCHO}%`,
+                  top: `${50 + desplazamiento.y * 100 / VISTA_ALTO}%`,
+                  transform: 'translate(-50%, -50%)'
+                }}
+              />
+              <div className="pointer-events-none absolute inset-1 rounded-lg border border-dashed border-white/55" />
+            </div>
           </div>
-          <p className="text-center text-[11px] font-semibold text-slate-600">Esta es la zona que aparecerá en el informe</p>
-          <p className="text-center text-[10px] text-slate-500">Arrastra para mover · Pellizca para ampliar · Marco 5:6</p>
+          <p className="text-center text-[11px] font-medium text-slate-500">Arrastra para mover · Pellizca para ampliar · Marco 5:6</p>
+
+          <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+            <div className="mb-2 flex items-center justify-between">
+              <label htmlFor={`zoom-${tipo}`} className="flex items-center gap-2 text-xs font-bold text-slate-700"><ZoomIn className="h-4 w-4 text-orange-600" /> Zoom</label>
+              <span className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-black tabular-nums text-slate-700">{Math.round(zoom * 100)}%</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => modificarZoom(zoom - 0.05)} disabled={guardando || zoom <= ZOOM_MIN} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 disabled:opacity-35" aria-label="Reducir zoom"><Minus className="h-4 w-4" /></button>
+              <input id={`zoom-${tipo}`} type="range" min={ZOOM_MIN} max={ZOOM_MAX} step="0.01" value={zoom} onChange={e => modificarZoom(e.target.value)} disabled={guardando} className="min-w-0 flex-1 accent-orange-600" aria-label="Nivel de zoom" />
+              <button type="button" onClick={() => modificarZoom(zoom + 0.05)} disabled={guardando || zoom >= ZOOM_MAX} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 disabled:opacity-35" aria-label="Aumentar zoom"><Plus className="h-4 w-4" /></button>
+            </div>
+            <div className="mt-2 flex gap-2">
+              <button type="button" onClick={restaurar} disabled={guardando} className="flex h-9 flex-1 items-center justify-center gap-1 rounded-lg border border-slate-200 text-[11px] font-semibold text-slate-700 disabled:opacity-40"><RotateCcw className="h-3.5 w-3.5" /> Restablecer</button>
+              <button type="button" onClick={onOtraFoto} disabled={guardando} className="h-9 flex-1 rounded-lg border border-slate-200 text-[11px] font-semibold text-slate-700 disabled:opacity-40">Elegir otra</button>
+            </div>
+          </div>
+          {error && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-[11px] font-semibold text-rose-700">{error}</p>}
         </div>
 
-        <div className="space-y-3 p-4">
-          <div className="flex items-center justify-between">
-            <label htmlFor={`zoom-${tipo}`} className="flex items-center gap-1.5 text-xs font-bold text-slate-700"><ZoomIn className="h-4 w-4 text-[#ea580c]" /> Zoom</label>
-            <span className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-bold tabular-nums text-slate-700">{Math.round(zoom * 100)}%</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <button type="button" onClick={() => modificarZoom(zoom - 0.1)} disabled={guardando || zoom <= 1} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 disabled:opacity-40" aria-label="Reducir zoom"><Minus className="h-4 w-4" /></button>
-            <input id={`zoom-${tipo}`} type="range" min="1" max={ZOOM_MAX} step="0.02" value={zoom} onChange={e => modificarZoom(e.target.value)} disabled={guardando} className="w-full accent-orange-600" aria-label="Nivel de zoom" />
-            <button type="button" onClick={() => modificarZoom(zoom + 0.1)} disabled={guardando || zoom >= ZOOM_MAX} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 disabled:opacity-40" aria-label="Aumentar zoom"><Plus className="h-4 w-4" /></button>
-          </div>
-          {error && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 p-2.5 text-[11px] font-semibold text-rose-700">{error}</p>}
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={restablecer} disabled={guardando} className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2 py-2.5 text-xs font-bold text-slate-600 disabled:opacity-40"><RotateCcw className="h-4 w-4" /> Restablecer</button>
-            <button type="button" onClick={onOtraFoto} disabled={guardando} className="flex-1 rounded-xl border border-slate-200 bg-white px-2 py-2.5 text-xs font-bold text-slate-600 disabled:opacity-40">Elegir otra</button>
-          </div>
-          <button
-            type="button"
-            onClick={() => onGuardar(zoom, posicion)}
-            disabled={guardando}
-            className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#ea580c] text-sm font-bold text-white shadow-sm transition-colors hover:bg-[#c2410c] active:scale-[0.98] disabled:opacity-60"
-          >
+        <footer className="shrink-0 border-t border-slate-100 bg-white px-3 py-2.5" style={{ paddingBottom: 'max(10px, env(safe-area-inset-bottom))' }}>
+          <button type="button" onClick={() => onGuardar(zoom, posicion)} disabled={guardando} className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#ea580c] text-[13px] font-bold text-white shadow-sm disabled:opacity-60">
             {guardando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
             {guardando ? 'Guardando fotografía...' : 'Guardar fotografía encuadrada'}
           </button>
-        </div>
+        </footer>
       </div>
     </div>
   );
+  return typeof document !== 'undefined' ? createPortal(modal, document.body) : null;
 }
 
 // Fuera del componente: evita que los botones se desmonten durante cada
 // actualización automática de la inspección colaborativa.
-const TarjetaFoto = React.memo(function TarjetaFoto({ tipo, etiqueta, guardada, cargando, deshabilitada, onElegir }) {
+// "compacto" solo modifica la apariencia de los botones en móvil.
+const TarjetaFoto = React.memo(function TarjetaFoto({ tipo, etiqueta, guardada, cargando, deshabilitada, onElegir, compacto = false }) {
   return (
     <button
       type="button"
       onClick={() => onElegir(tipo, guardada)}
       disabled={deshabilitada}
       aria-label={`${guardada ? 'Reemplazar' : 'Añadir'} fotografía de ${etiqueta}`}
-      className={`group flex h-12 min-w-[145px] touch-manipulation items-center gap-2.5 rounded-xl border px-3 text-left shadow-sm transition-all active:scale-[0.98] ${guardada ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100' : 'border-slate-300 bg-slate-50 text-slate-600 hover:bg-slate-100'} disabled:cursor-not-allowed disabled:opacity-50`}
+      className={`group flex touch-manipulation items-center border shadow-sm transition-all active:scale-[0.98] ${
+        compacto
+          ? 'h-[74px] w-full min-w-0 flex-col justify-center gap-0.5 rounded-2xl px-1.5 py-1.5 text-center md:h-12 md:w-auto md:min-w-[145px] md:flex-row md:gap-2.5 md:rounded-xl md:px-3 md:text-left'
+          : 'h-12 min-w-[145px] gap-2.5 rounded-xl px-3 text-left'
+      } ${
+        guardada
+          ? (compacto
+              ? 'border-emerald-300 bg-emerald-50/70 text-emerald-800 hover:bg-emerald-50 md:bg-emerald-50 md:hover:bg-emerald-100'
+              : 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100')
+          : (compacto
+              ? 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 md:border-slate-300 md:bg-slate-50 md:hover:bg-slate-100'
+              : 'border-slate-300 bg-slate-50 text-slate-600 hover:bg-slate-100')
+      } disabled:cursor-not-allowed disabled:opacity-50`}
     >
-      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${guardada ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-600'}`}>
+      <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${guardada ? (compacto ? 'bg-emerald-500 text-white md:bg-emerald-600' : 'bg-emerald-600 text-white') : (compacto ? 'bg-slate-100 text-slate-500 md:bg-slate-200 md:text-slate-600' : 'bg-slate-200 text-slate-600')}`}>
         {cargando ? <Loader2 className="h-4 w-4 animate-spin" /> : guardada ? <CheckCircle2 className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
       </span>
-      <span className="min-w-0 flex-1">
+      <span className={`min-w-0 ${compacto ? 'md:flex-1' : 'flex-1'}`}>
         <span className="block text-[11px] font-black leading-tight">{etiqueta}</span>
-        <span className={`mt-0.5 block text-[9px] font-semibold ${guardada ? 'text-emerald-600' : 'text-slate-400'}`}>
+        <span className={`mt-0.5 block text-[9px] font-semibold leading-tight ${guardada ? 'text-emerald-600' : 'text-slate-400'}`}>
           {cargando ? 'Guardando...' : guardada ? 'Fotografía cargada' : 'Añadir fotografía'}
         </span>
       </span>
-      {guardada && !cargando && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />}
+      {guardada && !cargando && (
+        <CheckCircle2 className={`h-4 w-4 shrink-0 text-emerald-600 ${compacto ? 'hidden md:block' : ''}`} />
+      )}
     </button>
   );
 });
-
 export default function FotografiasProceso({
   apiUrl = API_URL, procesoId, lightOk = false, darkOk = false,
-  disabled = false, modoHistorial = false, onEstadoChange, onLocalPhoto, onPhotoSaved
+  disabled = false, modoHistorial = false, compacto = false, onEstadoChange, onLocalPhoto, onPhotoSaved
 }) {
   const [estado, setEstado] = useState({ light: Boolean(lightOk), dark: Boolean(darkOk) });
   const [subiendo, setSubiendo] = useState(null);
@@ -282,12 +444,12 @@ export default function FotografiasProceso({
     else setSelectorTipo(tipo);
   }, []);
 
-  const elegirArchivo = (evento, tipo) => {
+  const elegirArchivo = async (evento, tipo) => {
     const archivo = evento.target.files?.[0];
-    evento.target.value = '';
+    evento.target.value = ''; // Permite tomar de nuevo una foto con el mismo nombre.
     if (!archivo || !tipo || preparando || subidaRef.current) return;
     if (archivo.size > MAX_ARCHIVO) {
-      setMensaje({ tipo: 'error', texto: 'La fotografía original excede 60 MB.' });
+      setMensaje({ tipo: 'error', texto: 'La fotografia original excede 60 MB.' });
       return;
     }
     const extensionImagen = /\.(jpe?g|png|webp|heic|heif|avif)$/i.test(archivo.name || '');
@@ -295,28 +457,19 @@ export default function FotografiasProceso({
       setMensaje({ tipo: 'error', texto: 'Selecciona un archivo de imagen compatible.' });
       return;
     }
-
     setPreparando(true);
     setMensaje(null);
-    const url = URL.createObjectURL(archivo);
-    const imagen = new Image();
-    imagen.onload = () => {
-      setPreparando(false);
-      if (!imagen.naturalWidth || !imagen.naturalHeight) {
-        URL.revokeObjectURL(url);
-        setMensaje({ tipo: 'error', texto: 'No se pudo identificar el tamaño de la fotografía.' });
-        return;
-      }
+    try {
+      const { imagen, url } = await normalizarImagenParaMovil(archivo);
       setSelectorTipo(null);
       setErrorEditor('');
       setEditor({ tipo, imagen, url });
-    };
-    imagen.onerror = () => {
-      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('No se pudo preparar la fotografía de la cámara:', error);
+      setMensaje({ tipo: 'error', texto: error?.message || 'La cámara produjo una imagen no compatible. Prueba con la galería.' });
+    } finally {
       setPreparando(false);
-      setMensaje({ tipo: 'error', texto: 'No fue posible abrir esta imagen. Usa una fotografía JPEG, PNG o la cámara del dispositivo.' });
-    };
-    imagen.src = url;
+    }
   };
 
   const guardarEncuadre = async (zoom, posicion) => {
@@ -378,11 +531,15 @@ export default function FotografiasProceso({
 
   return (
     <>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 sm:mr-1 md:text-[10px]">Fotografías embalaje</span>
-        <div className="flex flex-wrap items-center gap-2">
-          <TarjetaFoto tipo="light" etiqueta="Embalaje Light" guardada={estado.light} cargando={subiendo === 'light'} deshabilitada={disabled || Boolean(subiendo) || preparando} onElegir={seleccionar} />
-          <TarjetaFoto tipo="dark" etiqueta="Embalaje Dark" guardada={estado.dark} cargando={subiendo === 'dark'} deshabilitada={disabled || Boolean(subiendo) || preparando} onElegir={seleccionar} />
+      <div className={compacto ? 'flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center' : 'flex flex-col gap-2 sm:flex-row sm:items-center'}>
+        <span className={compacto
+          ? 'block text-center text-[11px] font-bold uppercase tracking-[0.1em] text-slate-600 md:mr-1 md:text-left md:text-[10px] md:font-black md:text-slate-400'
+          : 'text-[9px] font-black uppercase tracking-wider text-slate-400 sm:mr-1 md:text-[10px]'}>
+          Fotografías embalaje
+        </span>
+        <div className={compacto ? 'grid w-full grid-cols-2 gap-2.5 md:flex md:w-auto md:flex-wrap md:items-center md:gap-2' : 'flex flex-wrap items-center gap-2'}>
+          <TarjetaFoto tipo="light" etiqueta="Embalaje Light" guardada={estado.light} cargando={subiendo === 'light'} deshabilitada={disabled || Boolean(subiendo) || preparando} onElegir={seleccionar} compacto={compacto} />
+          <TarjetaFoto tipo="dark" etiqueta="Embalaje Dark" guardada={estado.dark} cargando={subiendo === 'dark'} deshabilitada={disabled || Boolean(subiendo) || preparando} onElegir={seleccionar} compacto={compacto} />
         </div>
       </div>
 
@@ -419,7 +576,7 @@ export default function FotografiasProceso({
               <div className="grid grid-cols-2 gap-2">
                 <label className="relative flex h-20 cursor-pointer touch-manipulation flex-col items-center justify-center gap-1.5 overflow-hidden rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-700 active:scale-[0.98]">
                   <Camera className="h-6 w-6 text-[#ea580c]" />Tomar fotografía
-                  <input type="file" accept="image/*" capture="environment" aria-label="Tomar fotografía" onChange={e => elegirArchivo(e, selectorTipo)} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+                  <input type="file" accept="image/*" {...(!ES_IOS ? { capture: 'environment' } : {})} aria-label="Tomar fotografía" onChange={e => elegirArchivo(e, selectorTipo)} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
                 </label>
                 <label className="relative flex h-20 cursor-pointer touch-manipulation flex-col items-center justify-center gap-1.5 overflow-hidden rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-700 active:scale-[0.98]">
                   <ImageIcon className="h-6 w-6 text-[#2563eb]" />Seleccionar imagen
@@ -430,7 +587,7 @@ export default function FotografiasProceso({
             {mensaje?.tipo === 'error' && (
               <p role="alert" className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-2 text-[11px] font-semibold text-rose-700">{mensaje.texto}</p>
             )}
-            <p className="mt-3 text-center text-[10px] text-slate-400">Al seleccionar una imagen podrás moverla y ampliar la zona de cerezas antes de subirla.</p>
+            <p className="mt-3 text-center text-[10px] text-slate-400">{ES_IOS ? 'En iPhone, elige Tomar foto desde el selector nativo para evitar pantallas negras.' : 'Podrás mover y ampliar la imagen antes de guardar.'}</p>
           </div>
         </div>
       )}
@@ -440,6 +597,7 @@ export default function FotografiasProceso({
           key={`${editor.tipo}-${editor.url}`}
           tipo={editor.tipo}
           imagen={editor.imagen}
+          imagenUrl={editor.url}
           guardando={Boolean(subiendo)}
           error={errorEditor}
           onGuardar={guardarEncuadre}

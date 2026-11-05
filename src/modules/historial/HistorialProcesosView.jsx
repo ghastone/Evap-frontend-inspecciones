@@ -283,7 +283,7 @@ export default function HistorialProcesosView({ onVerResumen, onAbrirMenu = null
     }
     const rect = evento.currentTarget.getBoundingClientRect();
     const ancho = 256;
-    const altoEstimado = (puedeEditar ? 112 : 0) + (puedeEliminar ? 56 : 0) + 62;
+    const altoEstimado = (puedeEditar ? 56 : 0) + (puedeEliminar ? 56 : 0) + 62;
     const margen = 10;
     const izquierda = Math.max(margen, Math.min(rect.right - ancho, window.innerWidth - ancho - margen));
     const cabeAbajo = window.innerHeight - rect.bottom >= altoEstimado + margen;
@@ -1224,11 +1224,6 @@ export default function HistorialProcesosView({ onVerResumen, onAbrirMenu = null
                                 <Edit3 className="h-4 w-4 text-blue-600" /> Editar proceso {isEnCurso ? '(En curso)' : ''}
                               </button>
                             )}
-                            {puedeEditar && (
-                              <button type="button" disabled={isEnCurso} onClick={() => { setMenuProcesoAbiertoId(null); abrirVistaPrevia(id); }} className="flex w-full items-center gap-2.5 px-3 py-3 text-[12px] font-semibold text-slate-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-40">
-                                <Eye className="h-4 w-4 text-amber-600" /> Modificar fotografías {isEnCurso ? '(En curso)' : ''}
-                              </button>
-                            )}
                             <button type="button" disabled={isEnCurso || generandoReporteId === id} onClick={() => { setMenuProcesoAbiertoId(null); descargarPDF(id); }} className="flex w-full items-center gap-2.5 px-3 py-3 text-[12px] font-semibold text-slate-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40">
                               <Download className="h-4 w-4 text-emerald-600" /> {generandoReporteId === id ? 'Generando PDF...' : 'Descargar informe PDF'}
                             </button>
@@ -1281,13 +1276,44 @@ export default function HistorialProcesosView({ onVerResumen, onAbrirMenu = null
                         {cargandoVistaPreviaId === id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4" />}
                       </button>
                       {confirmarAbierto && (
-                        <div className="absolute bottom-[44px] right-0 z-50 w-[218px] rounded-xl bg-slate-900 p-3 text-left text-[11px] font-medium text-white shadow-xl" onClick={e => e.stopPropagation()}>
-                          <p>{isEnCurso ? 'El informe resumen no está disponible hasta finalizar la inspección.' : '¿Deseas ver el informe resumen?'}</p>
-                          <div className="mt-2 flex justify-end gap-2">
-                            <button type="button" onClick={() => setConfirmacionResumenMovilId(null)} className="rounded-md px-2.5 py-1.5 text-slate-200 hover:bg-slate-700">Cerrar</button>
-                            {!isEnCurso && <button type="button" onClick={() => { setConfirmacionResumenMovilId(null); abrirVistaPrevia(id); }} className="rounded-md bg-amber-500 px-2.5 py-1.5 font-bold text-slate-900 hover:bg-amber-400">Ver informe</button>}
+                        <div
+                          role="dialog"
+                          aria-label={`Confirmar vista previa del proceso ${proc.numProceso}`}
+                          className="absolute bottom-[46px] right-0 z-50 w-[240px] max-w-[calc(100vw-40px)] rounded-2xl border border-slate-200 bg-white p-3.5 text-left text-[12px] text-slate-700 shadow-[0_10px_30px_rgba(15,23,42,0.14)]"
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <div className="flex items-start gap-2">
+                            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-orange-50 text-[#EA580C]">
+                              <Eye className="h-4 w-4" aria-hidden="true" />
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[12px] font-bold leading-4 text-slate-800">
+                                {isEnCurso ? 'Informe no disponible' : 'Ver resumen de inspección'}
+                              </p>
+                              <p className="mt-1 text-[11px] leading-4 text-slate-500">
+                                {isEnCurso ? 'Disponible cuando termine la inspección.' : '¿Deseas abrir el informe del proceso?'}
+                              </p>
+                            </div>
                           </div>
-                          <span className="absolute -bottom-1 right-3 h-2 w-2 rotate-45 bg-slate-900"></span>
+                          <div className="mt-3 flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setConfirmacionResumenMovilId(null)}
+                              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+                            >
+                              Cerrar
+                            </button>
+                            {!isEnCurso && (
+                              <button
+                                type="button"
+                                onClick={() => { setConfirmacionResumenMovilId(null); abrirVistaPrevia(id); }}
+                                className="rounded-lg bg-[#EA580C] px-3 py-2 text-[11px] font-bold text-white shadow-sm transition-colors hover:bg-[#C2410C]"
+                              >
+                                Ver informe
+                              </button>
+                            )}
+                          </div>
+                          <span className="pointer-events-none absolute -bottom-[5px] right-3 h-2.5 w-2.5 rotate-45 border-b border-r border-slate-200 bg-white" />
                         </div>
                       )}
                     </div>
@@ -1543,12 +1569,6 @@ export default function HistorialProcesosView({ onVerResumen, onAbrirMenu = null
                                       </div>
                                     </button>
                                   )}
-                                  {puedeEditar && (
-                                    <button type="button" onClick={() => !isEnCurso && (setMenuProcesoAbiertoId(null), abrirVistaPrevia(proc.id))} disabled={isEnCurso} className={`flex w-full items-center gap-3 px-4 py-3.5 text-xs font-bold transition-colors ${isEnCurso ? 'cursor-not-allowed bg-slate-50 opacity-50' : 'text-slate-700 hover:bg-amber-50'}`}>
-                                      <Eye className={`h-4 w-4 ${isEnCurso ? 'text-slate-400' : 'text-amber-600'}`} />
-                                      <span>Modificar fotografías</span>
-                                    </button>
-                                  )}
                                   <button
                                     onClick={() => !isEnCurso && descargarPDF(proc.id)}
                                     disabled={generandoReporteId === proc.id || isEnCurso}
@@ -1662,23 +1682,6 @@ export default function HistorialProcesosView({ onVerResumen, onAbrirMenu = null
                   <button onClick={() => setDatosVistaPrevia(null)} className="p-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"><X className="w-5 h-5" /></button>
                 </div>
               </div>
-              {puedeEditar && datosVistaPrevia.estado !== 'En curso' && (
-                <div className="border-b border-amber-100 bg-amber-50/50 px-4 py-3 sm:px-6">
-                  <p className="mb-1.5 text-[11px] font-semibold text-slate-600">Puedes añadir o reemplazar las fotografías de este proceso finalizado sin modificar la inspección.</p>
-                  <FotografiasProceso
-                    apiUrl={API_URL}
-                    procesoId={datosVistaPrevia.id || datosVistaPrevia._id || datosVistaPrevia.proceso_id}
-                    modoHistorial
-                    lightOk={Boolean(datosVistaPrevia.fotoLight)}
-                    darkOk={Boolean(datosVistaPrevia.fotoDark)}
-                    onPhotoSaved={({ tipo, imagen }) => setDatosVistaPrevia(prev => prev ? {
-                      ...prev,
-                      fotoLight: tipo === 'light' ? imagen : prev.fotoLight,
-                      fotoDark: tipo === 'dark' ? imagen : prev.fotoDark
-                    } : prev)}
-                  />
-                </div>
-              )}
               <div className="flex-1 overflow-auto bg-slate-200 p-2 sm:p-6 custom-scrollbar" onTouchStart={iniciarPinch} onTouchMove={moverPinch} onTouchEnd={terminarPinch} onTouchCancel={terminarPinch}>
                 <div className="min-w-full flex justify-center items-start">
                   <div className="relative shrink-0" style={{ width: `${816 * zoomVistaPrevia}px`, height: `${1056 * zoomVistaPrevia}px` }}>

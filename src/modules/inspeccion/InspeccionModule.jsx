@@ -26,6 +26,16 @@ const nivelPorLimite = (pct, lim1, lim2) => {
   if (lim1 === null || lim2 === null) return 1;
   return pct > lim2 ? 3 : pct > lim1 ? 2 : 1;
 };
+// Ficha compacta para el resumen móvil; no altera los cálculos existentes.
+const MetricaAcumuladaMovil = ({ etiqueta, children, claseValor = '' }) => (
+  <div className="flex min-h-[60px] min-w-0 flex-col items-center justify-center rounded-xl border border-[#F1F5F9] bg-[#F8FAFC] px-1.5 py-2 text-center">
+    <span className="w-full truncate text-[10px] font-semibold leading-tight text-[#64748B]">{etiqueta}</span>
+    <div className={`mt-1 w-full min-w-0 text-[14px] font-bold leading-tight tabular-nums text-[#0F172A] ${claseValor}`}>
+      {children}
+    </div>
+  </div>
+);
+
 export default function InspeccionModule({
   datosProceso,
   usuarioActual,
@@ -839,21 +849,59 @@ export default function InspeccionModule({
           </div>
           <img src="/Logo_goldanda.png" alt="Logo" className="h-7 md:h-10 object-contain hidden sm:block" />
         </div>
-        {/* 1. TARJETA: ACUMULADO DE PROCESO */}
-        <div className="bg-[#ffffff] rounded-2xl border-t-4 border-[#ea580c] border-x border-b border-[#e2e8f0] shadow-sm px-4 md:px-6 py-3.5 mb-3 shrink-0 w-full transition-all animate-fade-in-up delay-2">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2 md:mb-3">
-            <h2 className="text-[11px] md:text-xs font-bold text-[#94a3b8] tracking-wider uppercase">Acumulado de Proceso</h2>
-            <FotografiasProceso
-              apiUrl={API_URL}
-              procesoId={isColaborativo ? procesoIdBD : null}
-              lightOk={isColaborativo ? fotosProceso.light : Boolean(fotoLightLocal)}
-              darkOk={isColaborativo ? fotosProceso.dark : Boolean(fotoDarkLocal)}
-              disabled={Boolean(procesoCerradoRemotamente)}
-              onEstadoChange={setFotosProceso}
-              onLocalPhoto={(tipo, imagen) => tipo === 'light' ? setFotoLightLocal(imagen) : setFotoDarkLocal(imagen)}
-            />
+        {/* 1. TARJETA: ACUMULADO DE PROCESO. En móvil: diseño compacto 3 / 3 / 2. */}
+        <div className="mx-auto mb-3 w-full max-w-sm shrink-0 rounded-[24px] border-[1.5px] border-[#F97316] bg-white p-3.5 shadow-sm transition-all animate-fade-in-up delay-2 md:max-w-none md:rounded-2xl md:border md:border-t-4 md:border-x-[#e2e8f0] md:border-b-[#e2e8f0] md:border-t-[#ea580c] md:px-6 md:py-3.5">
+          <div className="mb-3 flex flex-col justify-between gap-2 md:mb-3 md:flex-row md:items-center">
+            <h2 className="hidden text-[11px] font-bold uppercase tracking-wider text-[#94a3b8] md:block md:text-xs">Acumulado de Proceso</h2>
+            <div className="w-full rounded-2xl border border-[#F1F5F9] bg-[#F8FAFC] px-2.5 py-2.5 md:w-auto md:rounded-none md:border-0 md:bg-transparent md:p-0">
+              <FotografiasProceso
+                apiUrl={API_URL}
+                procesoId={isColaborativo ? procesoIdBD : null}
+                lightOk={isColaborativo ? fotosProceso.light : Boolean(fotoLightLocal)}
+                darkOk={isColaborativo ? fotosProceso.dark : Boolean(fotoDarkLocal)}
+                disabled={Boolean(procesoCerradoRemotamente)}
+                compacto
+                onEstadoChange={setFotosProceso}
+                onLocalPhoto={(tipo, imagen) => tipo === 'light' ? setFotoLightLocal(imagen) : setFotoDarkLocal(imagen)}
+              />
+            </div>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-y-3 md:gap-y-4 gap-x-2 text-[#0f172a]">
+
+          {/* Etiqueta centrada sobre divisor, solo visible en móvil. */}
+          <div className="mb-3 flex items-center gap-2 md:hidden" aria-label="Acumulado de proceso móvil">
+            <span className="h-px flex-1 bg-slate-200 md:hidden" />
+            <h2 className="shrink-0 text-center text-[11px] font-bold uppercase tracking-[0.06em] text-[#475569] md:hidden">Acumulado de Proceso</h2>
+            <span className="h-px flex-1 bg-slate-200 md:hidden" />
+          </div>
+
+          {/* Móvil: alturas fijas y alineación uniforme, sin alterar datos. */}
+          <div className="space-y-2 md:hidden">
+            <div className="grid grid-cols-3 gap-2">
+              <MetricaAcumuladaMovil etiqueta="Proceso">{numProceso || '-'}</MetricaAcumuladaMovil>
+              <MetricaAcumuladaMovil etiqueta="Cajas analizadas">{totalCajasBanner}</MetricaAcumuladaMovil>
+              <MetricaAcumuladaMovil etiqueta="Sólidos (L/D)" claseValor="whitespace-nowrap text-[12px] sm:text-[14px]">
+                {promLight} <span className="font-normal text-slate-400">/</span> {promDark}
+              </MetricaAcumuladaMovil>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <MetricaAcumuladaMovil etiqueta="Exportable" claseValor="text-[#059669]">
+                {acumuladoFrutos ? pExpGlobal.toFixed(1) : '100.0'}%
+              </MetricaAcumuladaMovil>
+              <MetricaAcumuladaMovil etiqueta="Def. calidad">{acumuladoFrutos ? pCalGlobal.toFixed(1) : '0.0'}%</MetricaAcumuladaMovil>
+              <MetricaAcumuladaMovil etiqueta="Def. condición">{acumuladoFrutos ? pCondGlobal.toFixed(1) : '0.0'}%</MetricaAcumuladaMovil>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <MetricaAcumuladaMovil etiqueta="Calificación">{notaGlobal}</MetricaAcumuladaMovil>
+              <MetricaAcumuladaMovil etiqueta="Estado">
+                <span className={`inline-flex max-w-full items-center justify-center rounded-full border px-2 py-0.5 text-[11px] font-bold ${colorNota}`}>
+                  {estadoGlobal}
+                </span>
+              </MetricaAcumuladaMovil>
+            </div>
+          </div>
+
+          {/* Escritorio: conserva la disposición y dimensiones originales. */}
+          <div className="hidden md:grid md:grid-cols-4 lg:grid-cols-8 gap-y-3 md:gap-y-4 gap-x-2 text-[#0f172a]">
             <div className="flex flex-col border-r border-[#e2e8f0] pr-1 md:pr-2">
               <span className="text-[11px] font-semibold text-[#64748b] mb-0.5">Proceso</span>
               <span className="text-base md:text-[22px] font-black">{numProceso || '-'}</span>
